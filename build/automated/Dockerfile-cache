@@ -1,0 +1,22 @@
+ARG GOLANG_VERSION='1.26.1'
+FROM golang:${GOLANG_VERSION}-alpine AS builder
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -ldflags="-s -w" -o /app/main ./cmd/main.go
+
+FROM alpine:3.21
+WORKDIR /app
+
+COPY --from=builder /app/main .
+COPY --from=builder /app/.env.automated ./.env
+
+EXPOSE 8080
+CMD ["./main"]

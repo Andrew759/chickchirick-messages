@@ -1,0 +1,66 @@
+services:
+  nginx-messages:
+    build: ./build/automated/nginx
+    ports:
+      - '83:80'
+    depends_on:
+      - api-messages-automated
+    networks:
+      - backend-messages
+
+  api-messages-automated:
+    build:
+      context: .
+      dockerfile: ./build/automated/Dockerfile-cache
+    environment:
+      - DOCKER_BUILDKIT=1
+    ports:
+      - "8083:8080"
+    depends_on:
+      postgres-messages-automated:
+        condition: service_healthy
+    # volumes:
+    #   - .:/app
+    networks:
+      - backend-messages
+
+  postgres-messages-automated:
+    image: postgres:17.2
+    container_name: postgres-automated
+    hostname: postgres-messages-automated
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - ${DB_PORT}:${DB_INTERNAL_PORT}
+    networks:
+      - backend-messages
+    volumes:
+      - db_data_automated:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U pguser_test" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+#  redis-automated:
+#    image: redis:latest
+#    container_name: redis-automated
+#    hostname: redis-automated
+#    environment:
+#      REDIS_USER: redis
+#      REDIS_USER_PASSWORD: redispass
+#    ports:
+#      - "6385:6379"
+#    volumes:
+#      - redis_data_automated:/data
+#    networks:
+#      - backend-messages
+
+networks:
+  backend-messages:
+
+volumes:
+  db_data_automated:
+  redis_data_automated:

@@ -1,0 +1,39 @@
+services:
+  redis-messages:
+    image: redis:latest
+    environment:
+      REDIS_USER: ${REDIS_USER}
+      REDIS_USER_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - ${REDIS_PORT}:${REDIS_INTERNAL_PORT}
+    volumes:
+      - redis_data_messages:/data
+    networks:
+      - backend-messages
+
+  postgres-messages:
+    image: postgres:17.2
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - ${DB_PORT}:${DB_INTERNAL_PORT}
+    networks:
+      - backend-messages
+    volumes:
+      - db_data_messages:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  backend-messages:
+  chickchirick-shared-network:
+    external: true
+
+volumes:
+  db_data_messages:
+  redis_data_messages:

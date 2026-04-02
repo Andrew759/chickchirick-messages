@@ -1,0 +1,51 @@
+services:
+  nginx-messages:
+    build: ./build/prod/nginx
+    ports:
+      - '83:80'
+    depends_on:
+      - api-messages
+    networks:
+      - backend-messages
+  api-messages:
+    build:
+      context: .
+      dockerfile: ./build/prod/Dockerfile
+    ports:
+      - "8083:8080"
+    depends_on:
+      postgres-messages:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - backend-messages
+
+  redis-messages:
+    image: redis:latest
+    environment:
+      REDIS_USER: ${REDIS_USER}
+      REDIS_USER_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - ${REDIS_PORT}:${REDIS_INTERNAL_PORT}
+    networks:
+      - backend-messages
+
+  postgres-messages:
+    image: postgres:17.2
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - ${DB_PORT}:${DB_INTERNAL_PORT}
+    networks:
+      - backend-messages
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  backend-messages:
