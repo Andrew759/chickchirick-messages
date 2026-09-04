@@ -2,9 +2,11 @@ package chirik_config
 
 // server
 const (
-	ServerUrl = "SERVER_URL"
-	UserApp   = "USER_APP"
-	AuthApp   = "AUTH_APP"
+	ServerUrl      = "SERVER_URL"
+	UserApp        = "USER_APP"
+	AuthApp        = "AUTH_APP"
+	AuthAppGrpc    = "AUTH_APP_GRPC"
+	FrontendAppUrl = "FRONTEND_URL"
 )
 
 // environment

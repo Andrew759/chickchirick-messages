@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package messenger;
+option go_package = "./gen/messenger";
+
+import "google/protobuf/timestamp.proto";
+
+service MessengerService {
+  rpc MessageStream(stream SendMessageRequest) returns (stream MessageEvent);
+}
+
+message Message {
+  int64 id = 1;
+  int64 sender_id = 2;
+  int64 recipient_id = 3;
+  string text = 4;
+  google.protobuf.Timestamp created_at = 5;
+  optional int64 respond_message_id = 6;
+}
+
+message SendMessageRequest {
+  int64 recipient_id = 1;
+  string text = 2;
+  optional int64 respond_message_id = 3;
+}
+
+message MessageEvent {
+  oneof event {
+    Message message = 1;
+    int64 deleted_message_id = 2;
+  }
+}

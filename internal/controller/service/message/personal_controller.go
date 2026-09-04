@@ -25,7 +25,8 @@ func (pc *PersonalController) RegisterRoutes() {
 }
 
 func (pc *PersonalController) GetPersonals(c *gin.Context) {
-	personals, err := personal.GetPersonal(pc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	personals, err := personal.GetPersonal(ctx, pc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (pc *PersonalController) GetPersonal(c *gin.Context) {
 		return
 	}
 
-	p, err := personal.GetPersonalById(pc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	p, err := personal.GetPersonalById(ctx, pc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "personal not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (pc *PersonalController) CreatePersonal(c *gin.Context) {
 		return
 	}
 
-	if err := personal.CreatePersonal(pc.Controller.DI.DBDecorator.GDB(), &p); err != nil {
+	ctx := c.Request.Context()
+	if err := personal.CreatePersonal(ctx, pc.Controller.DI.DBDecorator.GDB(), &p); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create personal: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (pc *PersonalController) UpdatePersonal(c *gin.Context) {
 		return
 	}
 
-	err = personal.UpdatePersonalById(pc.Controller.DI.DBDecorator.GDB(), &p, id)
+	ctx := c.Request.Context()
+	err = personal.UpdatePersonalById(ctx, pc.Controller.DI.DBDecorator.GDB(), &p, id)
 	if err != nil {
 		if errors.Is(err, personal.PersonalNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (pc *PersonalController) DeletePersonal(c *gin.Context) {
 		return
 	}
 
-	err = personal.DeletePersonalById(pc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = personal.DeletePersonalById(ctx, pc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		if errors.Is(err, personal.PersonalNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

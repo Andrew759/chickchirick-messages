@@ -25,7 +25,8 @@ func (sc *StatusController) RegisterRoutes() {
 }
 
 func (sc *StatusController) GetStatuses(c *gin.Context) {
-	statuses, err := status.GetStatus(sc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	statuses, err := status.GetStatus(ctx, sc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (sc *StatusController) GetStatus(c *gin.Context) {
 		return
 	}
 
-	s, err := status.GetStatusById(sc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	s, err := status.GetStatusById(ctx, sc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "status not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (sc *StatusController) CreateStatus(c *gin.Context) {
 		return
 	}
 
-	if err := status.CreateStatus(sc.Controller.DI.DBDecorator.GDB(), &s); err != nil {
+	ctx := c.Request.Context()
+	if err := status.CreateStatus(ctx, sc.Controller.DI.DBDecorator.GDB(), &s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create status: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (sc *StatusController) UpdateStatus(c *gin.Context) {
 		return
 	}
 
-	err = status.UpdateStatusById(sc.Controller.DI.DBDecorator.GDB(), &s, id)
+	ctx := c.Request.Context()
+	err = status.UpdateStatusById(ctx, sc.Controller.DI.DBDecorator.GDB(), &s, id)
 	if err != nil {
 		if errors.Is(err, status.StatusNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (sc *StatusController) DeleteStatus(c *gin.Context) {
 		return
 	}
 
-	err = status.DeleteStatusById(sc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = status.DeleteStatusById(ctx, sc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		if errors.Is(err, status.StatusNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

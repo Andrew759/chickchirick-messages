@@ -1,13 +1,19 @@
 services:
   nginx-messages:
-    build: ./build/dev/nginx
+    build:
+      context: .
+      dockerfile: ./build/dev/nginx/Dockerfile
     ports:
       - '83:80'
     depends_on:
       - api-messages
+    volumes:
+      - ./build/dev/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
-      - backend-messages
-      - chickchirick-shared-network
+      backend-messages:
+      chickchirick-shared-network:
+        aliases:
+          - api-messages-nginx
 
   api-messages:
     build:
@@ -15,8 +21,10 @@ services:
       dockerfile: ./build/dev/Dockerfile
     ports:
       - "8083:8080"
+      - "8085:8085"
       - "40002:40000" # Порт для подключения IDE к отладчику
       - "6062:6060" #Порт трассировщика
+      - "50052:50052"
     cap_add:
       - SYS_PTRACE # Разрешает Delve управлять процессом
     security_opt:
@@ -27,5 +35,5 @@ services:
     volumes:
       - .:/app
     networks:
-      - backend-messages
-      - chickchirick-shared-network
+     backend-messages:
+     chickchirick-shared-network:

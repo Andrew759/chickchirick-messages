@@ -25,7 +25,8 @@ func (mc *MetaController) RegisterRoutes() {
 }
 
 func (mc *MetaController) GetMetas(c *gin.Context) {
-	metas, err := meta.GetMetas(mc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	metas, err := meta.GetMetas(ctx, mc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (mc *MetaController) GetMeta(c *gin.Context) {
 		return
 	}
 
-	m, err := meta.GetMetaById(mc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	m, err := meta.GetMetaById(ctx, mc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "meta not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (mc *MetaController) CreateMeta(c *gin.Context) {
 		return
 	}
 
-	if err := meta.CreateMeta(mc.Controller.DI.DBDecorator.GDB(), &m); err != nil {
+	ctx := c.Request.Context()
+	if err := meta.CreateMeta(ctx, mc.Controller.DI.DBDecorator.GDB(), &m); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create meta: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (mc *MetaController) UpdateMeta(c *gin.Context) {
 		return
 	}
 
-	err = meta.UpdateMetaById(mc.Controller.DI.DBDecorator.GDB(), &m, id)
+	ctx := c.Request.Context()
+	err = meta.UpdateMetaById(ctx, mc.Controller.DI.DBDecorator.GDB(), &m, id)
 	if err != nil {
 		if errors.Is(err, meta.MetaNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (mc *MetaController) DeleteMeta(c *gin.Context) {
 		return
 	}
 
-	err = meta.DeleteMetaById(mc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = meta.DeleteMetaById(ctx, mc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		if errors.Is(err, meta.MetaNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

@@ -25,7 +25,8 @@ func (gc *GroupController) RegisterRoutes() {
 }
 
 func (gc *GroupController) GetGroups(c *gin.Context) {
-	groups, err := group.GetGroups(gc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	groups, err := group.GetGroups(ctx, gc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (gc *GroupController) GetGroup(c *gin.Context) {
 		return
 	}
 
-	g, err := group.GetGroupById(gc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	g, err := group.GetGroupById(ctx, gc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (gc *GroupController) CreateGroup(c *gin.Context) {
 		return
 	}
 
-	if err := group.CreateGroup(gc.Controller.DI.DBDecorator.GDB(), &g); err != nil {
+	ctx := c.Request.Context()
+	if err := group.CreateGroup(ctx, gc.Controller.DI.DBDecorator.GDB(), &g); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create group: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (gc *GroupController) UpdateGroup(c *gin.Context) {
 		return
 	}
 
-	err = group.UpdateGroupById(gc.Controller.DI.DBDecorator.GDB(), &g, id)
+	ctx := c.Request.Context()
+	err = group.UpdateGroupById(ctx, gc.Controller.DI.DBDecorator.GDB(), &g, id)
 	if err != nil {
 		if errors.Is(err, group.GroupNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (gc *GroupController) DeleteGroup(c *gin.Context) {
 		return
 	}
 
-	err = group.DeleteGroupById(gc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = group.DeleteGroupById(ctx, gc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		if errors.Is(err, group.GroupNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

@@ -25,7 +25,8 @@ func (sc *SettingsController) RegisterRoutes() {
 }
 
 func (sc *SettingsController) GetSettings(c *gin.Context) {
-	settingList, err := settings.GetSettings(sc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	settingList, err := settings.GetSettings(ctx, sc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (sc *SettingsController) GetSetting(c *gin.Context) {
 		return
 	}
 
-	s, err := settings.GetSettingsById(sc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	s, err := settings.GetSettingsById(ctx, sc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Setting not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (sc *SettingsController) CreateSetting(c *gin.Context) {
 		return
 	}
 
-	if err := settings.CreateSettings(sc.Controller.DI.DBDecorator.GDB(), &s); err != nil {
+	ctx := c.Request.Context()
+	if err := settings.CreateSettings(ctx, sc.Controller.DI.DBDecorator.GDB(), &s); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create setting: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (sc *SettingsController) UpdateSetting(c *gin.Context) {
 		return
 	}
 
-	err = settings.UpdateSettingsById(sc.Controller.DI.DBDecorator.GDB(), &s, id)
+	ctx := c.Request.Context()
+	err = settings.UpdateSettingsById(ctx, sc.Controller.DI.DBDecorator.GDB(), &s, id)
 	if err != nil {
 		if errors.Is(err, settings.StatusNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (sc *SettingsController) DeleteSetting(c *gin.Context) {
 		return
 	}
 
-	err = settings.DeleteSettingsById(sc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = settings.DeleteSettingsById(ctx, sc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete setting: " + err.Error()})
 		return

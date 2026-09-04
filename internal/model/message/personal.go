@@ -2,7 +2,9 @@ package message
 
 import (
 	"chickchirick-messages/pkg/chirik_gorm_tweaks/time"
+	"context"
 	"errors"
+
 	"gorm.io/gorm"
 )
 
@@ -10,11 +12,11 @@ type Personal struct {
 	gorm.Model        `c_migrator:"enabled"`
 	Id                int          `json:"id" gorm:"type:int;unique;primaryKey;autoIncrement"`
 	MessageId         int          `json:"message_id" gorm:"type:int"`
-	Message           Message      `json:"message" gorm:"references:MessageId"`
+	Message           Message      `json:"message" gorm:"foreignKey:MessageId"`
 	SenderId          int          `json:"sender_id" gorm:"type:int"`
-	SenderRelation    UserRelation `json:"sender_relation" gorm:"references:SenderId"`
+	SenderRelation    UserRelation `json:"sender_relation" gorm:"foreignKey:SenderId;references:UserId"`
 	RecipientId       int          `json:"recipient_id" gorm:"type:int"`
-	RecipientRelation UserRelation `json:"recipient_relation" gorm:"references:RecipientId"`
+	RecipientRelation UserRelation `json:"recipient_relation" gorm:"foreignKey:RecipientId;references:UserId"`
 	CreatedAt         time.TimestampWithTimeZoneMicro
 	UpdatedAt         time.TimestampWithTimeZoneMicro
 	DeletedAt         gorm.DeletedAt `gorm:"index"`
@@ -22,42 +24,44 @@ type Personal struct {
 
 var PersonalNotFoundErr = errors.New("personal not found")
 
-func CreatePersonal(db *gorm.DB, p *Personal) error {
-	return db.Create(p).Error
+func CreatePersonal(ctx context.Context, db *gorm.DB, p *Personal) error {
+	return db.WithContext(ctx).Create(p).Error
 }
 
-func UpdatePersonalById(db *gorm.DB, p *Personal, id int) error {
+func UpdatePersonalById(ctx context.Context, db *gorm.DB, p *Personal, id int) error {
 	var personal Personal
-	result := db.First(&personal, id)
+	tx := db.WithContext(ctx)
 
+	result := tx.First(&personal, id)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return PersonalNotFoundErr
 	}
 
-	return db.Save(p).Error
+	return tx.Save(p).Error
 }
 
-func GetPersonal(db *gorm.DB) ([]Personal, error) {
+func GetPersonal(ctx context.Context, db *gorm.DB) ([]Personal, error) {
 	var personal []Personal
-	result := db.Find(&personal)
+	result := db.WithContext(ctx).Find(&personal)
 
 	return personal, result.Error
 }
 
-func GetPersonalById(db *gorm.DB, id int) (Personal, error) {
+func GetPersonalById(ctx context.Context, db *gorm.DB, id int) (Personal, error) {
 	var personal Personal
-	result := db.First(&personal, id)
+	result := db.WithContext(ctx).First(&personal, id)
 
 	return personal, result.Error
 }
 
-func DeletePersonalById(db *gorm.DB, id int) error {
+func DeletePersonalById(ctx context.Context, db *gorm.DB, id int) error {
 	var personal Personal
-	result := db.First(&personal, id)
+	tx := db.WithContext(ctx)
 
+	result := tx.First(&personal, id)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return PersonalNotFoundErr
 	}
 
-	return db.Delete(&Personal{}, id).Error
+	return tx.Delete(&Personal{}, id).Error
 }

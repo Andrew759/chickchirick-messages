@@ -14,9 +14,11 @@ RUN go mod download
 
 COPY ./ ./
 
-RUN go build -gcflags="all=-N -l" -o /main ./cmd/main.go
+COPY main /main
+RUN chmod +x /main
+
+#RUN go build -gcflags="all=-N -l" -o /main ./cmd/main.go
 
 EXPOSE 8080 40000
 
-# Запускаем бинарник из корня
 CMD ["dlv", "--listen=:40000", "--headless=true", "--api-version=2", "--accept-multiclient", "exec", "/main", "--continue"]

@@ -10,6 +10,7 @@ services:
       - redis_data_messages:/data
     networks:
       - backend-messages
+    command: redis-server --bind 0.0.0.0 --protected-mode no
 
   postgres-messages:
     image: postgres:17.2

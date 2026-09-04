@@ -25,7 +25,8 @@ func (fc *FileController) RegisterRoutes() {
 }
 
 func (fc *FileController) GetFiles(c *gin.Context) {
-	files, err := file.GetFiles(fc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	files, err := file.GetFiles(ctx, fc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (fc *FileController) GetFile(c *gin.Context) {
 		return
 	}
 
-	f, err := file.GetFileById(fc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	f, err := file.GetFileById(ctx, fc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "file not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (fc *FileController) CreateFile(c *gin.Context) {
 		return
 	}
 
-	if err := file.CreateFile(fc.Controller.DI.DBDecorator.GDB(), &f); err != nil {
+	ctx := c.Request.Context()
+	if err := file.CreateFile(ctx, fc.Controller.DI.DBDecorator.GDB(), &f); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create file: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (fc *FileController) UpdateFile(c *gin.Context) {
 		return
 	}
 
-	err = file.UpdateFileById(fc.Controller.DI.DBDecorator.GDB(), &f, id)
+	ctx := c.Request.Context()
+	err = file.UpdateFileById(ctx, fc.Controller.DI.DBDecorator.GDB(), &f, id)
 	if err != nil {
 		if errors.Is(err, file.FileNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (fc *FileController) DeleteFile(c *gin.Context) {
 		return
 	}
 
-	err = file.DeleteFileById(fc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = file.DeleteFileById(ctx, fc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		if errors.Is(err, file.FileNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

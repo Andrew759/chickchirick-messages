@@ -25,7 +25,8 @@ func (dc *DeletedController) RegisterRoutes() {
 }
 
 func (dc *DeletedController) GetDeletedList(c *gin.Context) {
-	deletedList, err := deleted.GetDeleted(dc.Controller.DI.DBDecorator.GDB())
+	ctx := c.Request.Context()
+	deletedList, err := deleted.GetDeleted(ctx, dc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -42,7 +43,8 @@ func (dc *DeletedController) GetDeleted(c *gin.Context) {
 		return
 	}
 
-	d, err := deleted.GetDeletedById(dc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	d, err := deleted.GetDeletedById(ctx, dc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "deleted not found: " + err.Error()})
 		return
@@ -58,7 +60,8 @@ func (dc *DeletedController) CreateDeleted(c *gin.Context) {
 		return
 	}
 
-	if err := deleted.CreateDeleted(dc.Controller.DI.DBDecorator.GDB(), &d); err != nil {
+	ctx := c.Request.Context()
+	if err := deleted.CreateDeleted(ctx, dc.Controller.DI.DBDecorator.GDB(), &d); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create deleted: " + err.Error()})
 		return
 	}
@@ -80,7 +83,8 @@ func (dc *DeletedController) UpdateDeleted(c *gin.Context) {
 		return
 	}
 
-	err = deleted.UpdateDeletedById(dc.Controller.DI.DBDecorator.GDB(), &d, id)
+	ctx := c.Request.Context()
+	err = deleted.UpdateDeletedById(ctx, dc.Controller.DI.DBDecorator.GDB(), &d, id)
 	if err != nil {
 		if errors.Is(err, deleted.DeletedNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
@@ -101,7 +105,8 @@ func (dc *DeletedController) DeleteDeleted(c *gin.Context) {
 		return
 	}
 
-	err = deleted.DeleteDeletedById(dc.Controller.DI.DBDecorator.GDB(), id)
+	ctx := c.Request.Context()
+	err = deleted.DeleteDeletedById(ctx, dc.Controller.DI.DBDecorator.GDB(), id)
 	if err != nil {
 		if errors.Is(err, deleted.DeletedNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
