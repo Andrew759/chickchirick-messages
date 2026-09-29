@@ -65,3 +65,12 @@ func DeletePersonalById(ctx context.Context, db *gorm.DB, id int) error {
 
 	return tx.Delete(&Personal{}, id).Error
 }
+
+func GetPersonalByMessageId(ctx context.Context, db *gorm.DB, messageId int) (Personal, error) {
+	var personal Personal
+	result := db.WithContext(ctx).Where("message_id = ?", messageId).First(&personal)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return personal, PersonalNotFoundErr
+	}
+	return personal, result.Error
+}

@@ -4,6 +4,7 @@ import (
 	"chickchirick-messages/internal/gen/messenger"
 	"chickchirick-messages/internal/model/message"
 	"context"
+	"fmt"
 
 	"gorm.io/gorm"
 )
@@ -58,4 +59,37 @@ func CreateMessage(ctx context.Context, db *gorm.DB, req *messenger.SendMessageR
 		return msg, errTx
 	}
 	return msg, err
+}
+
+func DeleteMessageForUser(ctx context.Context, db *gorm.DB, messageID int, userID int) (message.Personal, error) {
+	var personal message.Personal
+
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		p, err := message.GetPersonalByMessageId(ctx, tx, messageID)
+		if err != nil {
+			return err
+		}
+		if p.SenderId != userID {
+			return fmt.Errorf("forbidden: only sender can delete the message")
+		}
+
+		if err := message.DeleteMessageById(ctx, tx, messageID); err != nil {
+			return err
+		}
+
+		d := message.Deleted{
+			MessageId: messageID,
+			UserId:    userID,
+		}
+		if err := message.CreateDeleted(ctx, tx, &d); err != nil {
+			// не валим всю операцию, если audit не записался
+			// но лучше залогировать снаружи — здесь просто игнорируем нефатально
+			_ = err
+		}
+
+		personal = p
+		return nil
+	})
+
+	return personal, err
 }

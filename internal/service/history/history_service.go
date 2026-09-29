@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -12,7 +13,7 @@ type Message struct {
 	SenderID         int    `json:"senderId"`
 	RecipientID      int    `json:"recipientId"`
 	Text             string `json:"text"`
-	CreatedAt        any    `json:"createdAt,omitempty"`
+	CreatedAt        string `json:"createdAt"`
 	RespondMessageID *int   `json:"respondMessageId,omitempty"`
 }
 
@@ -40,7 +41,7 @@ func GetHistory(ctx context.Context, db *gorm.DB, userUUID string) (History, err
 		SenderID         int
 		RecipientID      int
 		Text             string
-		CreatedAt        any
+		CreatedAt        time.Time
 		RespondMessageID *int
 	}
 
@@ -63,7 +64,7 @@ func GetHistory(ctx context.Context, db *gorm.DB, userUUID string) (History, err
 			SenderID:         row.SenderID,
 			RecipientID:      row.RecipientID,
 			Text:             row.Text,
-			CreatedAt:        row.CreatedAt,
+			CreatedAt:        row.CreatedAt.String(),
 			RespondMessageID: row.RespondMessageID,
 		})
 	}

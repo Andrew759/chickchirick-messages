@@ -3,6 +3,7 @@ package ws
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"chickchirick-messages/internal/gen/messenger"
 
@@ -17,11 +18,13 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// IncomingMessage — сообщение от фронтенда (Vue → WS → gRPC)
 type IncomingMessage struct {
 	RecipientId int64  `json:"recipientId"`
 	Text        string `json:"text"`
 }
 
+// OutgoingEvent — JSON, который понимает фронтенд
 type OutgoingEvent struct {
 	Message          *OutgoingMessage `json:"message,omitempty"`
 	DeletedMessageId int64            `json:"deletedMessageId,omitempty"`
@@ -56,7 +59,6 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 		}
 
 		//TODO: для прода должны быть secure credentials
-		//Подключаемся к своему же gRPC-серверу (обязательны transport credentials)
 		conn, err := grpc.NewClient(
 			grpcAddr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -69,6 +71,7 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 
 		client := messenger.NewMessengerServiceClient(conn)
 
+		// Cookie → gRPC metadata (StreamAuthInterceptor)
 		rawCookie := r.Header.Get("Cookie")
 		if rawCookie == "" {
 			rawCookie = "access_token=" + tokenStr
@@ -110,7 +113,6 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			}
 		}()
 
-		//gRPC → Vue (нормальный JSON, а не сырой protobuf)
 		marshaler := protojson.MarshalOptions{
 			UseProtoNames:   false,
 			EmitUnpopulated: false,
@@ -127,14 +129,16 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			switch e := res.Event.(type) {
 			case *messenger.MessageEvent_Message:
 				m := e.Message
+				createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+				if m.CreatedAt != nil {
+					createdAt = m.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano)
+				}
 				out.Message = &OutgoingMessage{
 					Id:          m.Id,
 					SenderId:    m.SenderId,
 					RecipientId: m.RecipientId,
 					Text:        m.Text,
-				}
-				if m.CreatedAt != nil {
-					out.Message.CreatedAt = m.CreatedAt.AsTime().Format("2006-01-02T15:04:05Z07:00")
+					CreatedAt:   createdAt,
 				}
 			case *messenger.MessageEvent_DeletedMessageId:
 				out.DeletedMessageId = e.DeletedMessageId
