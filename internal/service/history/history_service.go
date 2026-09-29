@@ -50,7 +50,7 @@ func GetHistory(ctx context.Context, db *gorm.DB, userUUID string) (History, err
 		Select("m.id, p.sender_id, p.recipient_id, m.text, m.created_at, message_meta.respond_message_id").
 		Joins("JOIN messages AS m ON m.id = p.message_id").
 		Joins("LEFT JOIN message_meta ON message_meta.message_id = m.id").
-		Where("p.sender_id = ? OR p.recipient_id = ?", userID, userID).
+		Where("(p.sender_id = ? OR p.recipient_id = ?) AND m.deleted_at IS NULL", userID, userID).
 		Order("m.created_at ASC, m.id ASC").
 		Scan(&rows).Error
 	if err != nil {
