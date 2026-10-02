@@ -26,10 +26,17 @@ func NewController(db *gorm.DB, redis *redis.Client) *Controller {
 	}
 }
 
+type RedisTypingEvent struct {
+	SenderID    int64 `json:"sender_id"`
+	RecipientID int64 `json:"recipient_id"`
+	Typing      bool  `json:"typing"`
+}
+
 type RedisMessageEvent struct {
 	Type             grpc.MessageType   `json:"type"`
 	Message          *messenger.Message `json:"message,omitempty"`
 	DeletedMessageID int64              `json:"deleted_message_id,omitempty"`
+	Typing           *RedisTypingEvent  `json:"typing,omitempty"`
 }
 
 func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStreamServer) error {
@@ -67,6 +74,16 @@ func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStre
 				grpcEvent.Event = &messenger.MessageEvent_Message{Message: event.Message}
 			} else if event.Type == grpc.TypeDelete {
 				grpcEvent.Event = &messenger.MessageEvent_DeletedMessageId{DeletedMessageId: event.DeletedMessageID}
+			} else if event.Type == grpc.TypeTyping && event.Typing != nil {
+				grpcEvent.Event = &messenger.MessageEvent_Typing{
+					Typing: &messenger.TypingEvent{
+						SenderId:    event.Typing.SenderID,
+						RecipientId: event.Typing.RecipientID,
+						Typing:      event.Typing.Typing,
+					},
+				}
+			} else {
+				continue
 			}
 
 			if err := stream.Send(grpcEvent); err != nil {
@@ -85,9 +102,30 @@ func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStre
 				return
 			}
 
+			if req.Typing != nil {
+				eventData, err := json.Marshal(RedisMessageEvent{
+					Type: grpc.TypeTyping,
+					Typing: &RedisTypingEvent{
+						SenderID:    int64(userRelation.UserId),
+						RecipientID: req.RecipientId,
+						Typing:      req.GetTyping(),
+					},
+				})
+				if err != nil {
+					errChan <- err
+					return
+				}
+				if err := c.redis.Publish(ctx, fmt.Sprintf("user_events_%d", req.RecipientId), eventData).Err(); err != nil {
+					errChan <- err
+					return
+				}
+				continue
+			}
+
 			msg, err := service.CreateMessage(ctx, c.db, req, userRelation)
 			if err != nil {
 				errChan <- err
+				return
 			}
 
 			//Формирование объекта для рассылки

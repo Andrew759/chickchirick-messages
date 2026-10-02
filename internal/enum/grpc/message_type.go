@@ -7,6 +7,7 @@ type MessageType int
 const (
 	TypeNewMessage MessageType = iota + 1
 	TypeDelete
+	TypeTyping
 	TypeUnknown
 )
 
@@ -14,6 +15,7 @@ const (
 const (
 	strNewMessage = "new_message"
 	strDelete     = "delete"
+	StrTyping     = "typing"
 )
 
 // MarshalJSON преобразует enum в строку для Redis/JSON
@@ -23,6 +25,8 @@ func (t MessageType) MarshalJSON() ([]byte, error) {
 		return json.Marshal(strNewMessage)
 	case TypeDelete:
 		return json.Marshal(strDelete)
+	case TypeTyping:
+		return json.Marshal(StrTyping)
 	default:
 		return json.Marshal("")
 	}
@@ -40,6 +44,8 @@ func (t *MessageType) UnmarshalJSON(b []byte) error {
 		*t = TypeNewMessage
 	case strDelete:
 		*t = TypeDelete
+	case StrTyping:
+		*t = TypeTyping
 	default:
 		*t = TypeUnknown
 	}

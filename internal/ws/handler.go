@@ -20,14 +20,23 @@ var upgrader = websocket.Upgrader{
 
 // IncomingMessage — сообщение от фронтенда (Vue → WS → gRPC)
 type IncomingMessage struct {
+	Type        string `json:"type,omitempty"`
 	RecipientId int64  `json:"recipientId"`
-	Text        string `json:"text"`
+	Text        string `json:"text,omitempty"`
+	Typing      *bool  `json:"typing,omitempty"`
 }
 
 // OutgoingEvent — JSON, который понимает фронтенд
 type OutgoingEvent struct {
 	Message          *OutgoingMessage `json:"message,omitempty"`
 	DeletedMessageId int64            `json:"deletedMessageId,omitempty"`
+	Typing           *TypingEvent     `json:"typing,omitempty"`
+}
+
+type TypingEvent struct {
+	SenderId    int64 `json:"senderId"`
+	RecipientId int64 `json:"recipientId"`
+	Typing      bool  `json:"typing"`
 }
 
 type OutgoingMessage struct {
@@ -97,15 +106,28 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 					return
 				}
 
-				if msg.RecipientId == 0 || msg.Text == "" {
+				if msg.RecipientId == 0 {
 					log.Println("invalid incoming message:", msg)
 					continue
 				}
 
-				err := stream.Send(&messenger.SendMessageRequest{
+				req := &messenger.SendMessageRequest{
 					RecipientId: msg.RecipientId,
 					Text:        msg.Text,
-				})
+				}
+
+				if msg.Type == "typing" {
+					if msg.Typing != nil {
+						active := *msg.Typing
+						req.Typing = &active
+					} else {
+						active := msg.Text != "0"
+						req.Typing = &active
+					}
+					req.Text = ""
+				}
+
+				err := stream.Send(req)
 				if err != nil {
 					log.Println("stream send error:", err)
 					return
@@ -142,6 +164,16 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 				}
 			case *messenger.MessageEvent_DeletedMessageId:
 				out.DeletedMessageId = e.DeletedMessageId
+			case *messenger.MessageEvent_Typing:
+				if e.Typing != nil {
+					out.Typing = &TypingEvent{
+						SenderId:    e.Typing.SenderId,
+						RecipientId: e.Typing.RecipientId,
+						Typing:      e.Typing.Typing,
+					}
+				} else {
+					continue
+				}
 			default:
 				b, err := marshaler.Marshal(res)
 				if err != nil {
