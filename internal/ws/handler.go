@@ -60,6 +60,10 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 		if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
 			tokenStr = cookie.Value
 		}
+		// Фронт часто шлёт token в query (cookie с другого origin/порта не уходит)
+		if tokenStr == "" {
+			tokenStr = r.URL.Query().Get("token")
+		}
 
 		if tokenStr == "" {
 			log.Println("token missing")

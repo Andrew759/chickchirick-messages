@@ -31,7 +31,7 @@ func main() {
 	defer dbDecorator.CloseDB()
 
 	//TODO: не должно попасть в коммиты
-	dbDecorator.GDB().AutoMigrate(message.Message{}, message.Deleted{}, message.File{}, message.Group{}, message.Meta{}, message.Personal{}, message.Settings{}, message.Status{}, message.UserRelation{})
+	dbDecorator.GDB().AutoMigrate(message.Message{}, message.Deleted{}, message.File{}, message.Group{}, message.Meta{}, message.Personal{}, message.Settings{}, message.Status{}, message.UserRelation{}, message.E2EEIdentity{}, message.E2EEOneTimePreKey{})
 
 	redisDecorator := service.InitRedis(appConfig.RedisConfig)
 	defer redisDecorator.RedisClose()
