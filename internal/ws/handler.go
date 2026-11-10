@@ -56,17 +56,9 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 		}
 		defer wsConn.Close()
 
-		var tokenStr string
-		if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
-			tokenStr = cookie.Value
-		}
-		// Фронт часто шлёт token в query (cookie с другого origin/порта не уходит)
-		if tokenStr == "" {
-			tokenStr = r.URL.Query().Get("token")
-		}
-
-		if tokenStr == "" {
-			log.Println("token missing")
+		cookie, err := r.Cookie("access_token")
+		if err != nil || cookie.Value == "" {
+			log.Println("token missing: access_token cookie required")
 			_ = wsConn.WriteJSON(map[string]string{"error": "unauthorized"})
 			return
 		}
@@ -87,7 +79,7 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 		// Cookie → gRPC metadata (StreamAuthInterceptor)
 		rawCookie := r.Header.Get("Cookie")
 		if rawCookie == "" {
-			rawCookie = "access_token=" + tokenStr
+			rawCookie = "access_token=" + cookie.Value
 		}
 		md := metadata.New(map[string]string{
 			"cookie": rawCookie,
