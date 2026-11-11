@@ -35,6 +35,7 @@ type RedisTypingEvent struct {
 type RedisMessageEvent struct {
 	Type             grpc.MessageType   `json:"type"`
 	Message          *messenger.Message `json:"message,omitempty"`
+	GroupId          string             `json:"group_id,omitempty"`
 	DeletedMessageID int64              `json:"deleted_message_id,omitempty"`
 	Typing           *RedisTypingEvent  `json:"typing,omitempty"`
 }

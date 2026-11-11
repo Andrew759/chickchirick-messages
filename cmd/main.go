@@ -7,7 +7,6 @@ import (
 	messageController "chickchirick-messages/internal/controller/service/message"
 	"chickchirick-messages/internal/gen/messenger"
 	grpcClient "chickchirick-messages/internal/grpc"
-	"chickchirick-messages/internal/model/message"
 	"chickchirick-messages/internal/ws"
 	"chickchirick-messages/pkg/chirik_config"
 	"fmt"
@@ -29,9 +28,6 @@ func main() {
 
 	dbDecorator := service.InitORM(&appConfig.DatabaseConfig)
 	defer dbDecorator.CloseDB()
-
-	//TODO: не должно попасть в коммиты
-	dbDecorator.GDB().AutoMigrate(message.Message{}, message.Deleted{}, message.File{}, message.Group{}, message.Meta{}, message.Personal{}, message.Settings{}, message.Status{}, message.UserRelation{}, message.E2EEIdentity{}, message.E2EEOneTimePreKey{})
 
 	redisDecorator := service.InitRedis(appConfig.RedisConfig)
 	defer redisDecorator.RedisClose()
@@ -66,7 +62,7 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 
-		mux.HandleFunc("/ws", ws.HandleWS("127.0.0.1:50052"))
+		mux.HandleFunc("/ws", ws.HandleWS("127.0.0.1:50052", dbDecorator.Gorm))
 
 		fmt.Println("WebSocket server running on :8085")
 		if err := http.ListenAndServe(":8085", mux); err != nil {

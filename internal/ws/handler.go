@@ -1,17 +1,20 @@
 package ws
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
 
 	"chickchirick-messages/internal/gen/messenger"
+	"chickchirick-messages/internal/model/message"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
+	"gorm.io/gorm"
 )
 
 var upgrader = websocket.Upgrader{
@@ -22,6 +25,7 @@ var upgrader = websocket.Upgrader{
 type IncomingMessage struct {
 	Type        string `json:"type,omitempty"`
 	RecipientId int64  `json:"recipientId"`
+	GroupId     string `json:"groupId,omitempty"` // UUID группового чата
 	Text        string `json:"text,omitempty"`
 	Typing      *bool  `json:"typing,omitempty"`
 }
@@ -34,20 +38,23 @@ type OutgoingEvent struct {
 }
 
 type TypingEvent struct {
-	SenderId    int64 `json:"senderId"`
-	RecipientId int64 `json:"recipientId"`
-	Typing      bool  `json:"typing"`
+	SenderId    int64  `json:"senderId"`
+	RecipientId int64  `json:"recipientId"`
+	GroupId     string `json:"groupId,omitempty"`
+	Typing      bool   `json:"typing"`
 }
 
 type OutgoingMessage struct {
 	Id          int64  `json:"id"`
 	SenderId    int64  `json:"senderId"`
 	RecipientId int64  `json:"recipientId"`
+	GroupId     string `json:"groupId,omitempty"`
 	Text        string `json:"text"`
 	CreatedAt   string `json:"createdAt,omitempty"`
 }
 
-func HandleWS(grpcAddr string) http.HandlerFunc {
+// HandleWS grpcAddr — gRPC messenger; db опционален (для groupId lookup).
+func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsConn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -63,7 +70,6 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			return
 		}
 
-		//TODO: для прода должны быть secure credentials
 		conn, err := grpc.NewClient(
 			grpcAddr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -76,7 +82,6 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 
 		client := messenger.NewMessengerServiceClient(conn)
 
-		// Cookie → gRPC metadata (StreamAuthInterceptor)
 		rawCookie := r.Header.Get("Cookie")
 		if rawCookie == "" {
 			rawCookie = "access_token=" + cookie.Value
@@ -93,13 +98,18 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			return
 		}
 
-		//Vue → gRPC
 		go func() {
 			for {
 				var msg IncomingMessage
 				if err := wsConn.ReadJSON(&msg); err != nil {
 					log.Println("read ws error:", err)
 					return
+				}
+
+				// Групповые сообщения уходят через REST /group-chats/:uuid/messages
+				if msg.GroupId != "" {
+					log.Println("ws: group messages should use REST API, groupId=", msg.GroupId)
+					continue
 				}
 
 				if msg.RecipientId == 0 {
@@ -151,10 +161,20 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 				if m.CreatedAt != nil {
 					createdAt = m.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano)
 				}
+				groupId := ""
+				if m.RecipientId == 0 && db != nil && m.Id > 0 {
+					if link, err := message.GetGroupByMessageId(context.Background(), db, int(m.Id)); err == nil {
+						groupId = link.GroupId.String()
+						if m.SenderId == 0 && link.SenderId > 0 {
+							m.SenderId = int64(link.SenderId)
+						}
+					}
+				}
 				out.Message = &OutgoingMessage{
 					Id:          m.Id,
 					SenderId:    m.SenderId,
 					RecipientId: m.RecipientId,
+					GroupId:     groupId,
 					Text:        m.Text,
 					CreatedAt:   createdAt,
 				}

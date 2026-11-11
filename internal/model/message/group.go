@@ -11,10 +11,12 @@ import (
 
 type Group struct {
 	gorm.Model `c_migrator:"enabled"`
-	Id         int       `json:"id" gorm:"type:int;unique;primaryKey;autoIncrement"`
-	MessageId  int       `json:"message_id" gorm:"type:int"`
-	Message    Message   `json:"message" gorm:"foreignKey:MessageId"`
-	GroupId    uuid.UUID `json:"GroupId" gorm:"type:uuid"`
+	Id         int          `json:"id" gorm:"type:int;unique;primaryKey;autoIncrement"`
+	MessageId  int          `json:"message_id" gorm:"type:int;not null;index"`
+	Message    Message      `json:"message" gorm:"foreignKey:MessageId"`
+	GroupId    uuid.UUID    `json:"group_id" gorm:"type:uuid;not null;index"`
+	SenderId   int          `json:"sender_id" gorm:"type:int;not null;index;default:0"`
+	Sender     UserRelation `json:"sender,omitempty" gorm:"foreignKey:SenderId;references:UserId"`
 	CreatedAt  time.TimestampWithTimeZoneMicro
 	UpdatedAt  time.TimestampWithTimeZoneMicro
 	DeletedAt  gorm.DeletedAt `gorm:"index"`
@@ -48,8 +50,26 @@ func GetGroups(ctx context.Context, db *gorm.DB) ([]Group, error) {
 func GetGroupById(ctx context.Context, db *gorm.DB, id int) (Group, error) {
 	var group Group
 	result := db.WithContext(ctx).First(&group, id)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return group, GroupNotFoundErr
+	}
 
 	return group, result.Error
+}
+
+func GetGroupByMessageId(ctx context.Context, db *gorm.DB, messageId int) (Group, error) {
+	var group Group
+	result := db.WithContext(ctx).Where("message_id = ?", messageId).First(&group)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return group, GroupNotFoundErr
+	}
+	return group, result.Error
+}
+
+func GetGroupsByGroupId(ctx context.Context, db *gorm.DB, groupId uuid.UUID) ([]Group, error) {
+	var groups []Group
+	result := db.WithContext(ctx).Where("group_id = ?", groupId).Find(&groups)
+	return groups, result.Error
 }
 
 func DeleteGroupById(ctx context.Context, db *gorm.DB, id int) error {
