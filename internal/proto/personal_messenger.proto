@@ -22,11 +22,19 @@ message SendMessageRequest {
   int64 recipient_id = 1;
   string text = 2;
   optional int64 respond_message_id = 3;
+  optional bool typing = 4;
 }
 
 message MessageEvent {
   oneof event {
     Message message = 1;
     int64 deleted_message_id = 2;
+    TypingEvent typing = 3;
   }
+}
+
+message TypingEvent {
+  int64 sender_id = 1;
+  int64 recipient_id = 2;
+  bool typing = 3;
 }

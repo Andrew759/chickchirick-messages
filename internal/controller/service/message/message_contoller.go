@@ -4,8 +4,11 @@ import (
 	"chickchirick-messages/internal/controller/c_controller"
 	"chickchirick-messages/internal/middleware"
 	"chickchirick-messages/internal/model/message"
+	msgservice "chickchirick-messages/internal/service"
 	"chickchirick-messages/internal/service/history"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -21,10 +24,10 @@ func (mc *MessagesController) RegisterRoutes() {
 
 	e.GET("/messages", mc.GetMessages)
 	e.GET("/messages/history", middleware.Auth(mc.Controller.DI.AuthClient), mc.GetHistory)
-	e.POST("/message", mc.CreateMessage)
-	e.GET("/message/:id", mc.GetMessage)
-	e.PUT("/message/:id", mc.UpdateMessage)
-	e.DELETE("/message/:id", mc.DeleteMessage)
+	e.POST("/message", middleware.Auth(mc.Controller.DI.AuthClient), mc.CreateMessage)
+	e.GET("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.GetMessage)
+	e.PUT("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.UpdateMessage)
+	e.DELETE("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.DeleteMessage)
 }
 
 func (mc *MessagesController) GetHistory(c *gin.Context) {
@@ -127,20 +130,53 @@ func (mc *MessagesController) DeleteMessage(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		return
+	}
+
+	userUUIDV, ok := c.Get("user_uuid")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user uuid missing"})
+		return
+	}
+	userUUID, _ := userUUIDV.(string)
+	if userUUID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user uuid missing"})
 		return
 	}
 
 	ctx := c.Request.Context()
-	err = message.DeleteMessageById(ctx, mc.Controller.DI.DBDecorator.GDB(), id)
+	db := mc.Controller.DI.DBDecorator.GDB()
+
+	rel, err := message.GetUserRelationByUuid(ctx, db, userUUID)
 	if err != nil {
-		if errors.Is(err, message.MessageNotFoundErr) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete message: " + err.Error()})
-		}
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user relation not found"})
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	personal, err := msgservice.DeleteMessageForUser(ctx, db, id, rel.UserId)
+	if err != nil {
+		if errors.Is(err, message.MessageNotFoundErr) || errors.Is(err, message.PersonalNotFoundErr) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		if err.Error() == "forbidden: only sender can delete the message" {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete message: " + err.Error()})
+		return
+	}
+
+	//Рассылка deletedMessageId обоим участникам через Redis → WS/gRPC
+	eventData, _ := json.Marshal(map[string]any{
+		"type":               "delete",
+		"deleted_message_id": int64(id),
+	})
+
+	rdb := mc.Controller.DI.RedisDecorator.Client
+	_ = rdb.Publish(ctx, fmt.Sprintf("user_events_%d", personal.RecipientId), eventData).Err()
+	_ = rdb.Publish(ctx, fmt.Sprintf("user_events_%d", personal.SenderId), eventData).Err()
+
+	c.JSON(http.StatusOK, gin.H{"payload": map[string]any{"deletedMessageId": id}})
 }

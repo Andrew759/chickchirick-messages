@@ -1,41 +1,83 @@
 package ws
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"chickchirick-messages/internal/gen/messenger"
+	"chickchirick-messages/internal/model/message"
 
 	"github.com/gorilla/websocket"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
+	"gorm.io/gorm"
 )
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// IncomingMessage — сообщение от фронтенда (Vue → WS → gRPC)
 type IncomingMessage struct {
+	Type        string `json:"type,omitempty"`
 	RecipientId int64  `json:"recipientId"`
-	Text        string `json:"text"`
+	GroupId     string `json:"groupId,omitempty"` // UUID группового чата
+	Text        string `json:"text,omitempty"`
+	Typing      *bool  `json:"typing,omitempty"`
 }
 
+// OutgoingEvent — JSON, который понимает фронтенд
 type OutgoingEvent struct {
-	Message          *OutgoingMessage `json:"message,omitempty"`
-	DeletedMessageId int64            `json:"deletedMessageId,omitempty"`
+	Message             *OutgoingMessage          `json:"message,omitempty"`
+	DeletedMessageId    int64                     `json:"deletedMessageId,omitempty"`
+	Typing              *TypingEvent              `json:"typing,omitempty"`
+	GroupAdded          *GroupAddedEvent          `json:"groupAdded,omitempty"`
+	GroupMembersChanged *GroupMembersChangedEvent `json:"groupMembersChanged,omitempty"`
+}
+
+// GroupAddedEvent — вас добавили в группу (realtime)
+type GroupAddedEvent struct {
+	GroupUuid      string  `json:"group_uuid"`
+	Title          string  `json:"title"`
+	AvatarFileUuid *string `json:"avatar_file_uuid,omitempty"`
+	CreatedBy      int     `json:"created_by"`
+	MemberCount    int     `json:"member_count"`
+}
+
+// GroupMembersChangedEvent — состав группы изменился (E2EE re-key)
+type GroupMembersChangedEvent struct {
+	GroupUuid      string `json:"group_uuid"`
+	Title          string `json:"title,omitempty"`
+	AddedUserIds   []int  `json:"added_user_ids,omitempty"`
+	RemovedUserIds []int  `json:"removed_user_ids,omitempty"`
+	MemberCount    int    `json:"member_count"`
+	ActorUserId    int    `json:"actor_user_id"`
+}
+
+type TypingEvent struct {
+	SenderId    int64  `json:"senderId"`
+	RecipientId int64  `json:"recipientId"`
+	GroupId     string `json:"groupId,omitempty"`
+	Typing      bool   `json:"typing"`
 }
 
 type OutgoingMessage struct {
 	Id          int64  `json:"id"`
 	SenderId    int64  `json:"senderId"`
 	RecipientId int64  `json:"recipientId"`
+	GroupId     string `json:"groupId,omitempty"`
 	Text        string `json:"text"`
 	CreatedAt   string `json:"createdAt,omitempty"`
 }
 
-func HandleWS(grpcAddr string) http.HandlerFunc {
+// HandleWS grpcAddr — gRPC messenger; db опционален (для groupId lookup).
+func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		wsConn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -44,19 +86,13 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 		}
 		defer wsConn.Close()
 
-		var tokenStr string
-		if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
-			tokenStr = cookie.Value
-		}
-
-		if tokenStr == "" {
-			log.Println("token missing")
+		cookie, err := r.Cookie("access_token")
+		if err != nil || cookie.Value == "" {
+			log.Println("token missing: access_token cookie required")
 			_ = wsConn.WriteJSON(map[string]string{"error": "unauthorized"})
 			return
 		}
 
-		//TODO: для прода должны быть secure credentials
-		//Подключаемся к своему же gRPC-серверу (обязательны transport credentials)
 		conn, err := grpc.NewClient(
 			grpcAddr,
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -71,7 +107,7 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 
 		rawCookie := r.Header.Get("Cookie")
 		if rawCookie == "" {
-			rawCookie = "access_token=" + tokenStr
+			rawCookie = "access_token=" + cookie.Value
 		}
 		md := metadata.New(map[string]string{
 			"cookie": rawCookie,
@@ -85,7 +121,6 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			return
 		}
 
-		//Vue → gRPC
 		go func() {
 			for {
 				var msg IncomingMessage
@@ -94,15 +129,52 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 					return
 				}
 
-				if msg.RecipientId == 0 || msg.Text == "" {
+				if msg.GroupId != "" {
+					isTyping := msg.Type == "typing" || msg.Typing != nil
+					if !isTyping {
+						log.Println("ws: group messages should use REST API, groupId=", msg.GroupId)
+						continue
+					}
+					active := false
+					if msg.Typing != nil {
+						active = *msg.Typing
+					} else {
+						active = msg.Text != "0" && msg.Text != ""
+					}
+					req := &messenger.SendMessageRequest{
+						Text: "__GROUP_TYPING_CMD__" + msg.GroupId,
+						// Групповой typing: Text = __GROUP_TYPING_CMD__<uuid>
+						Typing: &active,
+					}
+					if err := stream.Send(req); err != nil {
+						log.Println("stream send group typing error:", err)
+						return
+					}
+					continue
+				}
+
+				if msg.RecipientId == 0 {
 					log.Println("invalid incoming message:", msg)
 					continue
 				}
 
-				err := stream.Send(&messenger.SendMessageRequest{
+				req := &messenger.SendMessageRequest{
 					RecipientId: msg.RecipientId,
 					Text:        msg.Text,
-				})
+				}
+
+				if msg.Type == "typing" {
+					if msg.Typing != nil {
+						active := *msg.Typing
+						req.Typing = &active
+					} else {
+						active := msg.Text != "0"
+						req.Typing = &active
+					}
+					req.Text = ""
+				}
+
+				err := stream.Send(req)
 				if err != nil {
 					log.Println("stream send error:", err)
 					return
@@ -110,7 +182,6 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			}
 		}()
 
-		//gRPC → Vue (нормальный JSON, а не сырой protobuf)
 		marshaler := protojson.MarshalOptions{
 			UseProtoNames:   false,
 			EmitUnpopulated: false,
@@ -127,17 +198,79 @@ func HandleWS(grpcAddr string) http.HandlerFunc {
 			switch e := res.Event.(type) {
 			case *messenger.MessageEvent_Message:
 				m := e.Message
+				// realtime: добавление в группу (транспорт через text-prefix)
+				if strings.HasPrefix(m.Text, "__GROUP_ADDED__") {
+					var g GroupAddedEvent
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(m.Text, "__GROUP_ADDED__")), &g); err == nil && g.GroupUuid != "" {
+						out.GroupAdded = &g
+						break
+					}
+				}
+				if strings.HasPrefix(m.Text, "__GROUP_MEMBERS_CHANGED__") {
+					var g GroupMembersChangedEvent
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(m.Text, "__GROUP_MEMBERS_CHANGED__")), &g); err == nil && g.GroupUuid != "" {
+						out.GroupMembersChanged = &g
+						break
+					}
+				}
+				if strings.HasPrefix(m.Text, "__GROUP_TYPING__") {
+					var gt struct {
+						GroupUuid string `json:"group_uuid"`
+						SenderID  int64  `json:"sender_id"`
+						Typing    bool   `json:"typing"`
+					}
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(m.Text, "__GROUP_TYPING__")), &gt); err == nil && gt.GroupUuid != "" {
+						out.Typing = &TypingEvent{
+							SenderId: gt.SenderID,
+							GroupId:  gt.GroupUuid,
+							Typing:   gt.Typing,
+						}
+						break
+					}
+				}
+				createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+				if m.CreatedAt != nil {
+					createdAt = m.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano)
+				}
+				text := m.Text
+				groupId := ""
+				// Явный group_id из MessageStream: "__GID__:<uuid>\n" + body
+				if strings.HasPrefix(text, "__GID__:") {
+					rest := strings.TrimPrefix(text, "__GID__:")
+					if i := strings.IndexByte(rest, '\n'); i >= 0 {
+						groupId = rest[:i]
+						text = rest[i+1:]
+					}
+				}
+				// Fallback: связь message → group в БД (без проверки recipient_id)
+				if groupId == "" && db != nil && m.Id > 0 {
+					if link, err := message.GetGroupByMessageId(context.Background(), db, int(m.Id)); err == nil {
+						groupId = link.GroupId.String()
+						if m.SenderId == 0 && link.SenderId > 0 {
+							m.SenderId = int64(link.SenderId)
+						}
+					}
+				}
 				out.Message = &OutgoingMessage{
 					Id:          m.Id,
 					SenderId:    m.SenderId,
 					RecipientId: m.RecipientId,
-					Text:        m.Text,
-				}
-				if m.CreatedAt != nil {
-					out.Message.CreatedAt = m.CreatedAt.AsTime().Format("2006-01-02T15:04:05Z07:00")
+					GroupId:     groupId,
+					Text:        text,
+					CreatedAt:   createdAt,
 				}
 			case *messenger.MessageEvent_DeletedMessageId:
 				out.DeletedMessageId = e.DeletedMessageId
+			case *messenger.MessageEvent_Typing:
+				if e.Typing != nil {
+					out.Typing = &TypingEvent{
+						SenderId:    e.Typing.SenderId,
+						RecipientId: e.Typing.RecipientId,
+						Typing:      e.Typing.Typing,
+					}
+				} else {
+					continue
+				}
 			default:
 				b, err := marshaler.Marshal(res)
 				if err != nil {

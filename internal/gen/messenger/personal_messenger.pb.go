@@ -112,6 +112,7 @@ type SendMessageRequest struct {
 	RecipientId      int64                  `protobuf:"varint,1,opt,name=recipient_id,json=recipientId,proto3" json:"recipient_id,omitempty"`
 	Text             string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 	RespondMessageId *int64                 `protobuf:"varint,3,opt,name=respond_message_id,json=respondMessageId,proto3,oneof" json:"respond_message_id,omitempty"`
+	Typing           *bool                  `protobuf:"varint,4,opt,name=typing,proto3,oneof" json:"typing,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -167,12 +168,20 @@ func (x *SendMessageRequest) GetRespondMessageId() int64 {
 	return 0
 }
 
+func (x *SendMessageRequest) GetTyping() bool {
+	if x != nil && x.Typing != nil {
+		return *x.Typing
+	}
+	return false
+}
+
 type MessageEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Event:
 	//
 	//	*MessageEvent_Message
 	//	*MessageEvent_DeletedMessageId
+	//	*MessageEvent_Typing
 	Event         isMessageEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -233,6 +242,15 @@ func (x *MessageEvent) GetDeletedMessageId() int64 {
 	return 0
 }
 
+func (x *MessageEvent) GetTyping() *TypingEvent {
+	if x != nil {
+		if x, ok := x.Event.(*MessageEvent_Typing); ok {
+			return x.Typing
+		}
+	}
+	return nil
+}
+
 type isMessageEvent_Event interface {
 	isMessageEvent_Event()
 }
@@ -245,35 +263,83 @@ type MessageEvent_DeletedMessageId struct {
 	DeletedMessageId int64 `protobuf:"varint,2,opt,name=deleted_message_id,json=deletedMessageId,proto3,oneof"`
 }
 
+type MessageEvent_Typing struct {
+	Typing *TypingEvent `protobuf:"bytes,3,opt,name=typing,proto3,oneof"`
+}
+
 func (*MessageEvent_Message) isMessageEvent_Event() {}
 
 func (*MessageEvent_DeletedMessageId) isMessageEvent_Event() {}
+func (*MessageEvent_Typing) isMessageEvent_Event()           {}
+
+type TypingEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SenderId      int64                  `protobuf:"varint,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	RecipientId   int64                  `protobuf:"varint,2,opt,name=recipient_id,json=recipientId,proto3" json:"recipient_id,omitempty"`
+	Typing        bool                   `protobuf:"varint,3,opt,name=typing,proto3" json:"typing,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TypingEvent) Reset() {
+	*x = TypingEvent{}
+	mi := &file_internal_proto_personal_messenger_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+func (x *TypingEvent) String() string { return protoimpl.X.MessageStringOf(x) }
+func (*TypingEvent) ProtoMessage()    {}
+func (x *TypingEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_proto_personal_messenger_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+func (*TypingEvent) Descriptor() ([]byte, []int) {
+	return file_internal_proto_personal_messenger_proto_rawDescGZIP(), []int{3}
+}
+func (x *TypingEvent) GetSenderId() int64 {
+	if x != nil {
+		return x.SenderId
+	}
+	return 0
+}
+func (x *TypingEvent) GetRecipientId() int64 {
+	if x != nil {
+		return x.RecipientId
+	}
+	return 0
+}
+func (x *TypingEvent) GetTyping() bool {
+	if x != nil {
+		return x.Typing
+	}
+	return false
+}
 
 var File_internal_proto_personal_messenger_proto protoreflect.FileDescriptor
 
 const file_internal_proto_personal_messenger_proto_rawDesc = "" +
-	"\n" +
-	"'internal/proto/personal_messenger.proto\x12\tmessenger\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf2\x01\n" +
-	"\aMessage\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1b\n" +
-	"\tsender_id\x18\x02 \x01(\x03R\bsenderId\x12!\n" +
-	"\frecipient_id\x18\x03 \x01(\x03R\vrecipientId\x12\x12\n" +
-	"\x04text\x18\x04 \x01(\tR\x04text\x129\n" +
-	"\n" +
-	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x121\n" +
-	"\x12respond_message_id\x18\x06 \x01(\x03H\x00R\x10respondMessageId\x88\x01\x01B\x15\n" +
-	"\x13_respond_message_id\"\x95\x01\n" +
-	"\x12SendMessageRequest\x12!\n" +
-	"\frecipient_id\x18\x01 \x01(\x03R\vrecipientId\x12\x12\n" +
-	"\x04text\x18\x02 \x01(\tR\x04text\x121\n" +
-	"\x12respond_message_id\x18\x03 \x01(\x03H\x00R\x10respondMessageId\x88\x01\x01B\x15\n" +
-	"\x13_respond_message_id\"w\n" +
-	"\fMessageEvent\x12.\n" +
-	"\amessage\x18\x01 \x01(\v2\x12.messenger.MessageH\x00R\amessage\x12.\n" +
-	"\x12deleted_message_id\x18\x02 \x01(\x03H\x00R\x10deletedMessageIdB\a\n" +
-	"\x05event2_\n" +
-	"\x10MessengerService\x12K\n" +
-	"\rMessageStream\x12\x1d.messenger.SendMessageRequest\x1a\x17.messenger.MessageEvent(\x010\x01B\x11Z\x0f./gen/messengerb\x06proto3"
+	"\x0a'internal/proto/personal_messenger.proto\x12\x09messenger\x1a\x1fgoogle/pro" +
+	"tobuf/timestamp.proto\x22\xf2\x01\x0a\x07Message\x12\x0e\x0a\x02id\x18\x01 \x01(\x03R\x02id\x12\x1b\x0a\x09sender_id\x18\x02" +
+	" \x01(\x03R\x08senderId\x12!\x0a\x0crecipient_id\x18\x03 \x01(\x03R\x0brecipientId\x12\x12\x0a\x04text\x18\x04 \x01(\x09R" +
+	"\x04text\x129\x0a\x0acreated_at\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampR\x09createdAt" +
+	"\x121\x0a\x12respond_message_id\x18\x06 \x01(\x03H\x00R\x10respondMessageId\x88\x01\x01B\x15\x0a\x13_respond_" +
+	"message_id\x22\xbd\x01\x0a\x12SendMessageRequest\x12!\x0a\x0crecipient_id\x18\x01 \x01(\x03R\x0brecipie" +
+	"ntId\x12\x12\x0a\x04text\x18\x02 \x01(\x09R\x04text\x121\x0a\x12respond_message_id\x18\x03 \x01(\x03H\x00R\x10respondM" +
+	"essageId\x88\x01\x01\x12\x1b\x0a\x06typing\x18\x04 \x01(\x08H\x01R\x06typing\x88\x01\x01B\x15\x0a\x13_respond_message_idB" +
+	"\x09\x0a\x07_typing\x22\xa9\x01\x0a\x0cMessageEvent\x12.\x0a\x07message\x18\x01 \x01(\x0b2\x12.messenger.Message" +
+	"H\x00R\x07message\x12.\x0a\x12deleted_message_id\x18\x02 \x01(\x03H\x00R\x10deletedMessageId\x120\x0a\x06t" +
+	"yping\x18\x03 \x01(\x0b2\x16.messenger.TypingEventH\x00R\x06typingB\x07\x0a\x05event\x22e\x0a\x0bTyping" +
+	"Event\x12\x1b\x0a\x09sender_id\x18\x01 \x01(\x03R\x08senderId\x12!\x0a\x0crecipient_id\x18\x02 \x01(\x03R\x0brecipi" +
+	"entId\x12\x16\x0a\x06typing\x18\x03 \x01(\x08R\x06typing2_\x0a\x10MessengerService\x12K\x0a\x0dMessageStre" +
+	"am\x12\x1d.messenger.SendMessageRequest\x1a\x17.messenger.MessageEvent(\x010\x01B\x11" +
+	"Z\x0f./gen/messengerb\x06proto3"
 
 var (
 	file_internal_proto_personal_messenger_proto_rawDescOnce sync.Once
@@ -287,23 +353,25 @@ func file_internal_proto_personal_messenger_proto_rawDescGZIP() []byte {
 	return file_internal_proto_personal_messenger_proto_rawDescData
 }
 
-var file_internal_proto_personal_messenger_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_internal_proto_personal_messenger_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_proto_personal_messenger_proto_goTypes = []any{
 	(*Message)(nil),               // 0: messenger.Message
 	(*SendMessageRequest)(nil),    // 1: messenger.SendMessageRequest
 	(*MessageEvent)(nil),          // 2: messenger.MessageEvent
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(*TypingEvent)(nil),           // 3: messenger.TypingEvent
+	(*timestamppb.Timestamp)(nil), // 4: google.protobuf.Timestamp
 }
 var file_internal_proto_personal_messenger_proto_depIdxs = []int32{
-	3, // 0: messenger.Message.created_at:type_name -> google.protobuf.Timestamp
+	4, // 0: messenger.Message.created_at:type_name -> google.protobuf.Timestamp
 	0, // 1: messenger.MessageEvent.message:type_name -> messenger.Message
-	1, // 2: messenger.MessengerService.MessageStream:input_type -> messenger.SendMessageRequest
-	2, // 3: messenger.MessengerService.MessageStream:output_type -> messenger.MessageEvent
-	3, // [3:4] is the sub-list for method output_type
-	2, // [2:3] is the sub-list for method input_type
+	3, // 2: messenger.MessageEvent.typing:type_name -> messenger.TypingEvent
+	1, // 3: messenger.MessengerService.MessageStream:input_type -> messenger.SendMessageRequest
+	2, // 4: messenger.MessengerService.MessageStream:output_type -> messenger.MessageEvent
+	4, // [4:5] is the sub-list for method output_type
+	3, // [3:4] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_internal_proto_personal_messenger_proto_init() }
@@ -316,6 +384,7 @@ func file_internal_proto_personal_messenger_proto_init() {
 	file_internal_proto_personal_messenger_proto_msgTypes[2].OneofWrappers = []any{
 		(*MessageEvent_Message)(nil),
 		(*MessageEvent_DeletedMessageId)(nil),
+		(*MessageEvent_Typing)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -323,7 +392,7 @@ func file_internal_proto_personal_messenger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_proto_personal_messenger_proto_rawDesc), len(file_internal_proto_personal_messenger_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
