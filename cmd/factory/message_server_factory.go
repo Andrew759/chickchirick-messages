@@ -22,6 +22,7 @@ func InitMessageServer(e *gin.Engine, mDIC *c_controller.DIContainer) {
 	messageServer.initStatusService(e, mDIC)
 	messageServer.initUserRelationService(e, mDIC)
 	messageServer.initE2EEService(e, mDIC)
+	messageServer.initChannelService(e, mDIC)
 }
 
 func (ms MessageServer) initMessageService(e *gin.Engine, aDIC *c_controller.DIContainer) internalService.MessagesController {
@@ -134,6 +135,17 @@ func (ms MessageServer) initUserRelationService(e *gin.Engine, aDIC *c_controlle
 
 func (ms MessageServer) initE2EEService(e *gin.Engine, aDIC *c_controller.DIContainer) internalService.E2EEController {
 	ctrl := internalService.E2EEController{
+		Controller: c_controller.Controller{
+			E:  e,
+			DI: aDIC,
+		},
+	}
+	ctrl.RegisterRoutes()
+	return ctrl
+}
+
+func (ms MessageServer) initChannelService(e *gin.Engine, aDIC *c_controller.DIContainer) internalService.ChannelController {
+	ctrl := internalService.ChannelController{
 		Controller: c_controller.Controller{
 			E:  e,
 			DI: aDIC,

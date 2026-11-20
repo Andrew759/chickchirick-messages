@@ -14,6 +14,7 @@ type Message struct {
 	SenderID         int    `json:"senderId"`
 	RecipientID      int    `json:"recipientId,omitempty"`
 	GroupID          string `json:"groupId,omitempty"`
+	ChannelID        string `json:"channelId,omitempty"`
 	Text             string `json:"text"`
 	CreatedAt        string `json:"createdAt"`
 	RespondMessageID *int   `json:"respondMessageId,omitempty"`
@@ -29,6 +30,7 @@ type row struct {
 	SenderID         int
 	RecipientID      int
 	GroupID          *string
+	ChannelID        *string
 	Text             string
 	CreatedAt        time.Time
 	RespondMessageID *int
@@ -76,7 +78,22 @@ func GetHistory(ctx context.Context, db *gorm.DB, userUUID string) (History, err
 		groupRows = nil
 	}
 
-	messages := make([]Message, 0, len(personalRows)+len(groupRows))
+	var channelRows []row
+	err = db.WithContext(ctx).
+		Table("channel_messages AS cm").
+		Select("m.id, cm.sender_id AS sender_id, NULL::int AS recipient_id, NULL::text AS group_id, cm.channel_id::text AS channel_id, m.text, m.created_at, message_meta.respond_message_id").
+		Joins("JOIN messages AS m ON m.id = cm.message_id").
+		Joins("LEFT JOIN message_meta ON message_meta.message_id = m.id").
+		Joins("JOIN channels AS ch ON ch.channel_uuid = cm.channel_id AND ch.deleted_at IS NULL").
+		Joins("JOIN channel_members AS cmem ON cmem.channel_id = ch.id AND cmem.user_id = ? AND cmem.deleted_at IS NULL", userID).
+		Where("m.deleted_at IS NULL AND cm.deleted_at IS NULL").
+		Order("m.created_at ASC, m.id ASC").
+		Scan(&channelRows).Error
+	if err != nil {
+		channelRows = nil
+	}
+
+	messages := make([]Message, 0, len(personalRows)+len(groupRows)+len(channelRows))
 	for _, r := range personalRows {
 		messages = append(messages, Message{
 			ID:               r.ID,
@@ -96,6 +113,20 @@ func GetHistory(ctx context.Context, db *gorm.DB, userUUID string) (History, err
 			ID:               r.ID,
 			SenderID:         r.SenderID,
 			GroupID:          gid,
+			Text:             r.Text,
+			CreatedAt:        r.CreatedAt.UTC().Format(time.RFC3339Nano),
+			RespondMessageID: r.RespondMessageID,
+		})
+	}
+	for _, r := range channelRows {
+		cid := ""
+		if r.ChannelID != nil {
+			cid = *r.ChannelID
+		}
+		messages = append(messages, Message{
+			ID:               r.ID,
+			SenderID:         r.SenderID,
+			ChannelID:        cid,
 			Text:             r.Text,
 			CreatedAt:        r.CreatedAt.UTC().Format(time.RFC3339Nano),
 			RespondMessageID: r.RespondMessageID,
