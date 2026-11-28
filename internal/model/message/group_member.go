@@ -14,46 +14,43 @@ const (
 	GroupRoleMember = "member"
 )
 
-// ChatGroupMember — участник группового чата.
-type ChatGroupMember struct {
+// GroupMember — участник группового чата.
+type GroupMember struct {
 	gorm.Model `c_migrator:"enabled" c_migrator_t_name:"chat_group_members"`
 	Id         int          `json:"id" gorm:"type:int;unique;primaryKey;autoIncrement"`
 	GroupId    int          `json:"group_id" gorm:"type:int;not null;index;uniqueIndex:idx_group_user"`
-	Group      ChatGroup    `json:"group,omitempty" gorm:"foreignKey:GroupId"`
+	Group      GroupMeta    `json:"group" gorm:"foreignKey:GroupId"`
 	UserId     int          `json:"user_id" gorm:"type:int;not null;index;uniqueIndex:idx_group_user"`
-	User       UserRelation `json:"user,omitempty" gorm:"foreignKey:UserId;references:UserId"`
+	User       UserRelation `json:"user" gorm:"foreignKey:UserId;references:UserId"`
 	Role       string       `json:"role" gorm:"type:varchar(20);not null;default:'member'"`
 	CreatedAt  time.TimestampWithTimeZoneMicro
 	UpdatedAt  time.TimestampWithTimeZoneMicro
 	DeletedAt  gorm.DeletedAt `gorm:"index"`
 }
 
-func (ChatGroupMember) TableName() string { return "chat_group_members" }
+func (GroupMember) TableName() string { return "group_members" }
 
-var ChatGroupMemberNotFoundErr = errors.New("chat group member not found")
-var ChatGroupForbiddenErr = errors.New("not a group member")
+var GroupMemberNotFoundErr = errors.New("group member not found")
+var GroupForbiddenErr = errors.New("not a group member")
 
-func CreateChatGroupMember(ctx context.Context, db *gorm.DB, m *ChatGroupMember) error {
-	if m.Role == "" {
-		m.Role = GroupRoleMember
-	}
+func CreateGroupMember(ctx context.Context, db *gorm.DB, m *GroupMember) error {
 	return db.WithContext(ctx).Create(m).Error
 }
 
-func GetGroupMember(ctx context.Context, db *gorm.DB, groupId, userId int) (ChatGroupMember, error) {
-	var m ChatGroupMember
+func GetGroupMember(ctx context.Context, db *gorm.DB, groupId, userId int) (GroupMember, error) {
+	var m GroupMember
 	result := db.WithContext(ctx).
 		Where("group_id = ? AND user_id = ?", groupId, userId).
 		First(&m)
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return m, ChatGroupMemberNotFoundErr
+		return m, GroupMemberNotFoundErr
 	}
 	return m, result.Error
 }
 
 func IsGroupMember(ctx context.Context, db *gorm.DB, groupId, userId int) (bool, error) {
 	_, err := GetGroupMember(ctx, db, groupId, userId)
-	if errors.Is(err, ChatGroupMemberNotFoundErr) {
+	if errors.Is(err, GroupMemberNotFoundErr) {
 		return false, nil
 	}
 	if err != nil {
@@ -62,8 +59,8 @@ func IsGroupMember(ctx context.Context, db *gorm.DB, groupId, userId int) (bool,
 	return true, nil
 }
 
-func ListGroupMembers(ctx context.Context, db *gorm.DB, groupId int) ([]ChatGroupMember, error) {
-	var members []ChatGroupMember
+func ListGroupMembers(ctx context.Context, db *gorm.DB, groupId int) ([]GroupMember, error) {
+	var members []GroupMember
 	err := db.WithContext(ctx).Where("group_id = ?", groupId).Find(&members).Error
 	return members, err
 }
@@ -71,7 +68,7 @@ func ListGroupMembers(ctx context.Context, db *gorm.DB, groupId int) ([]ChatGrou
 func ListGroupMemberUserIds(ctx context.Context, db *gorm.DB, groupId int) ([]int, error) {
 	var ids []int
 	err := db.WithContext(ctx).
-		Model(&ChatGroupMember{}).
+		Model(&GroupMember{}).
 		Where("group_id = ?", groupId).
 		Pluck("user_id", &ids).Error
 	return ids, err
@@ -80,12 +77,12 @@ func ListGroupMemberUserIds(ctx context.Context, db *gorm.DB, groupId int) ([]in
 func DeleteGroupMember(ctx context.Context, db *gorm.DB, groupId, userId int) error {
 	result := db.WithContext(ctx).
 		Where("group_id = ? AND user_id = ?", groupId, userId).
-		Delete(&ChatGroupMember{})
+		Delete(&GroupMember{})
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ChatGroupMemberNotFoundErr
+		return GroupMemberNotFoundErr
 	}
 	return nil
 }

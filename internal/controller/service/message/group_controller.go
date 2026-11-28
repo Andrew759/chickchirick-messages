@@ -7,6 +7,7 @@ import (
 	"chickchirick-messages/internal/service"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,26 +22,29 @@ func (gc *GroupController) RegisterRoutes() {
 	e := gc.Controller.E
 	auth := middleware.Auth(gc.Controller.DI.AuthClient)
 
-	// legacy CRUD по строкам groups (message→group link) оставляем
+	// legacy CRUD
 	e.GET("/groups", gc.GetGroups)
 	e.POST("/group", gc.CreateGroup)
 	e.GET("/group/:id", gc.GetGroup)
 	e.PUT("/group/:id", gc.UpdateGroup)
 	e.DELETE("/group/:id", gc.DeleteGroup)
 
-	// полноценные групповые чаты
 	e.GET("/group-chats", auth, gc.ListMyGroupChats)
 	e.POST("/group-chats", auth, gc.CreateGroupChat)
 	e.GET("/group-chats/:uuid", auth, gc.GetGroupChat)
 	e.PATCH("/group-chats/:uuid", auth, gc.UpdateGroupChat)
+	e.DELETE("/group-chats/:uuid", auth, gc.DeleteGroupChat)
 	e.GET("/group-chats/:uuid/members", auth, gc.ListMembers)
 	e.POST("/group-chats/:uuid/members", auth, gc.AddMembers)
 	e.DELETE("/group-chats/:uuid/members/:userId", auth, gc.RemoveMember)
 	e.POST("/group-chats/:uuid/messages", auth, gc.SendGroupMessage)
+	e.DELETE("/group-chats/:uuid/messages/:id", auth, gc.DeleteGroupMessage)
+	e.PATCH("/group-chats/:uuid/messages/:id", auth, gc.UpdateGroupMessage)
 	e.POST("/group-chats/:uuid/typing", auth, gc.GroupTyping)
 }
 
-func (gc *GroupController) currentUser(c *gin.Context) (model.UserRelation, bool) {
+// TODO: реализовать через middleware?
+func (gc *GroupController) currentUserRelation(c *gin.Context) (model.UserRelation, bool) {
 	raw, ok := c.Get("user_uuid")
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
@@ -53,22 +57,13 @@ func (gc *GroupController) currentUser(c *gin.Context) (model.UserRelation, bool
 	}
 	ur, err := model.GetUserRelationByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), userUUID)
 	if err != nil || ur.UserId == 0 {
-		// авто-создание relation при первом обращении
-		parsed, perr := uuid.Parse(userUUID)
-		if perr != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
-			return model.UserRelation{}, false
-		}
-		ur = model.UserRelation{UserUuid: parsed}
-		if err := model.CreateUserRelation(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), &ur); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve user"})
-			return model.UserRelation{}, false
-		}
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
+		return model.UserRelation{}, false
 	}
 	return ur, true
 }
 
-type createGroupChatRequest struct {
+type createGroupRequest struct {
 	Title          string  `json:"title"`
 	AvatarFileUuid *string `json:"avatar_file_uuid"`
 	MemberUserIds  []int   `json:"member_user_ids"`
@@ -83,7 +78,7 @@ type groupChatResponse struct {
 	MemberCount    int     `json:"member_count,omitempty"`
 }
 
-func toGroupChatResponse(g model.ChatGroup, memberCount int) groupChatResponse {
+func toGroupChatResponse(g model.GroupMeta, memberCount int) groupChatResponse {
 	resp := groupChatResponse{
 		Id:          g.Id,
 		GroupUuid:   g.GroupUuid.String(),
@@ -99,12 +94,12 @@ func toGroupChatResponse(g model.ChatGroup, memberCount int) groupChatResponse {
 }
 
 func (gc *GroupController) CreateGroupChat(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
 
-	var req createGroupChatRequest
+	var req createGroupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 		return
@@ -115,7 +110,8 @@ func (gc *GroupController) CreateGroupChat(c *gin.Context) {
 	}
 
 	var avatar *uuid.UUID
-	if req.AvatarFileUuid != nil && *req.AvatarFileUuid != "" {
+	// TODO: предполагается, что фронтенд может слать nil, но не пустую строку
+	if req.AvatarFileUuid != nil {
 		parsed, err := uuid.Parse(*req.AvatarFileUuid)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid avatar_file_uuid"})
@@ -139,7 +135,7 @@ func (gc *GroupController) CreateGroupChat(c *gin.Context) {
 		rdbClient = rdb.Client
 	}
 
-	// 1) Явное событие group_added — группа сразу в списке у всех участников
+	//Явное событие group_added — группа сразу в списке у всех участников
 	notifyIDs := make([]int, 0, len(members))
 	for _, m := range members {
 		notifyIDs = append(notifyIDs, m.UserId)
@@ -151,29 +147,16 @@ func (gc *GroupController) CreateGroupChat(c *gin.Context) {
 		service.ChatGroupToPayload(group, len(members)),
 	)
 
-	// 2) Системное сообщение — fan-out через тот же канал, что и обычные group messages
-	//    (на случай, если клиент ещё не обработал group_added)
-	sysText := "Группа «" + group.Title + "» создана"
-	_, _, _ = service.CreateGroupMessage(
-		c.Request.Context(),
-		gc.Controller.DI.DBDecorator.GDB(),
-		rdbClient,
-		ur,
-		group.GroupUuid,
-		sysText,
-		nil,
-	)
-
 	c.JSON(http.StatusCreated, toGroupChatResponse(group, len(members)))
 }
 
 func (gc *GroupController) ListMyGroupChats(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
 
-	groups, err := model.ListChatGroupsForUser(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), ur.UserId)
+	groups, err := model.ListGroupMetasForUser(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), ur.UserId)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -181,6 +164,7 @@ func (gc *GroupController) ListMyGroupChats(c *gin.Context) {
 
 	out := make([]groupChatResponse, 0, len(groups))
 	for _, g := range groups {
+		//TODO: тут множественные запромсы в цикле
 		ids, _ := model.ListGroupMemberUserIds(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id)
 		out = append(out, toGroupChatResponse(g, len(ids)))
 	}
@@ -188,7 +172,7 @@ func (gc *GroupController) ListMyGroupChats(c *gin.Context) {
 }
 
 func (gc *GroupController) GetGroupChat(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -198,18 +182,18 @@ func (gc *GroupController) GetGroupChat(c *gin.Context) {
 		return
 	}
 
-	g, err := model.GetChatGroupByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	gm, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 		return
 	}
-	okMember, err := model.IsGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id, ur.UserId)
+	okMember, err := model.IsGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), gm.Id, ur.UserId)
 	if err != nil || !okMember {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not a member"})
 		return
 	}
-	ids, _ := model.ListGroupMemberUserIds(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id)
-	c.JSON(http.StatusOK, toGroupChatResponse(g, len(ids)))
+	ids, _ := model.ListGroupMemberUserIds(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), gm.Id)
+	c.JSON(http.StatusOK, toGroupChatResponse(gm, len(ids)))
 }
 
 type updateGroupChatRequest struct {
@@ -218,7 +202,7 @@ type updateGroupChatRequest struct {
 }
 
 func (gc *GroupController) UpdateGroupChat(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -228,7 +212,7 @@ func (gc *GroupController) UpdateGroupChat(c *gin.Context) {
 		return
 	}
 
-	g, err := model.GetChatGroupByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	g, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 		return
@@ -271,8 +255,8 @@ func (gc *GroupController) UpdateGroupChat(c *gin.Context) {
 	c.JSON(http.StatusOK, toGroupChatResponse(g, len(ids)))
 }
 
-func (gc *GroupController) ListMembers(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+func (gc *GroupController) DeleteGroupChat(c *gin.Context) {
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -281,7 +265,34 @@ func (gc *GroupController) ListMembers(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group uuid"})
 		return
 	}
-	g, err := model.GetChatGroupByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	g, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+		return
+	}
+	member, err := model.GetGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id, ur.UserId)
+	if err != nil || member.Role != model.GroupRoleOwner {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only owner can delete group"})
+		return
+	}
+	if err := model.DeleteGroupMeta(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (gc *GroupController) ListMembers(c *gin.Context) {
+	ur, ok := gc.currentUserRelation(c)
+	if !ok {
+		return
+	}
+	groupUuid, err := uuid.Parse(c.Param("uuid"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group uuid"})
+		return
+	}
+	g, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 		return
@@ -304,7 +315,7 @@ type addMembersRequest struct {
 }
 
 func (gc *GroupController) AddMembers(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -313,7 +324,7 @@ func (gc *GroupController) AddMembers(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group uuid"})
 		return
 	}
-	g, err := model.GetChatGroupByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	g, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 		return
@@ -338,8 +349,8 @@ func (gc *GroupController) AddMembers(c *gin.Context) {
 		if exists {
 			continue
 		}
-		m := model.ChatGroupMember{GroupId: g.Id, UserId: uid, Role: model.GroupRoleMember}
-		if err := model.CreateChatGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), &m); err == nil {
+		m := model.GroupMember{GroupId: g.Id, UserId: uid, Role: model.GroupRoleMember}
+		if err := model.CreateGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), &m); err == nil {
 			added++
 			addedIDs = append(addedIDs, uid)
 		}
@@ -377,7 +388,7 @@ func (gc *GroupController) AddMembers(c *gin.Context) {
 }
 
 func (gc *GroupController) RemoveMember(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -387,7 +398,7 @@ func (gc *GroupController) RemoveMember(c *gin.Context) {
 		return
 	}
 	targetId := 0
-	g, err := model.GetChatGroupByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	g, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 		return
@@ -435,8 +446,84 @@ type groupTypingRequest struct {
 	Typing bool `json:"typing"`
 }
 
+func (gc *GroupController) UpdateGroupMessage(c *gin.Context) {
+	ur, ok := gc.currentUserRelation(c)
+	if !ok {
+		return
+	}
+	groupUuid, err := uuid.Parse(c.Param("uuid"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group uuid"})
+		return
+	}
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		return
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text is required"})
+		return
+	}
+	err = service.UpdateGroupMessage(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), gc.Controller.DI.RedisDecorator.Client, ur, groupUuid, id, req.Text)
+	if err != nil {
+		switch {
+		case errors.Is(err, model.MessageNotFoundErr), errors.Is(err, model.GroupNotFoundErr), errors.Is(err, model.GroupMetaNotFoundErr):
+			c.JSON(http.StatusNotFound, gin.H{"error": "message or group not found"})
+		case errors.Is(err, model.GroupForbiddenErr), err.Error() == "forbidden: only sender can edit the message":
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "text": req.Text, "edited": true})
+}
+
+func (gc *GroupController) DeleteGroupMessage(c *gin.Context) {
+	ur, ok := gc.currentUserRelation(c)
+	if !ok {
+		return
+	}
+	groupUuid, err := uuid.Parse(c.Param("uuid"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group uuid"})
+		return
+	}
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
+		return
+	}
+
+	err = service.DeleteGroupMessage(
+		c.Request.Context(),
+		gc.Controller.DI.DBDecorator.GDB(),
+		gc.Controller.DI.RedisDecorator.Client,
+		ur,
+		groupUuid,
+		id,
+	)
+	if err != nil {
+		if errors.Is(err, model.GroupNotFoundErr) || errors.Is(err, model.MessageNotFoundErr) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+			return
+		}
+		if errors.Is(err, model.GroupForbiddenErr) || err.Error() == "forbidden: only sender can delete the message" {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"payload": map[string]any{"deletedMessageId": id}})
+}
+
 func (gc *GroupController) GroupTyping(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -462,11 +549,11 @@ func (gc *GroupController) GroupTyping(c *gin.Context) {
 		ur.UserId,
 		req.Typing,
 	); err != nil {
-		if errors.Is(err, model.ChatGroupForbiddenErr) {
+		if errors.Is(err, model.GroupForbiddenErr) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "not a member"})
 			return
 		}
-		if errors.Is(err, model.ChatGroupNotFoundErr) {
+		if errors.Is(err, model.GroupMetaNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 			return
 		}
@@ -477,7 +564,7 @@ func (gc *GroupController) GroupTyping(c *gin.Context) {
 }
 
 func (gc *GroupController) SendGroupMessage(c *gin.Context) {
-	ur, ok := gc.currentUser(c)
+	ur, ok := gc.currentUserRelation(c)
 	if !ok {
 		return
 	}
@@ -507,11 +594,11 @@ func (gc *GroupController) SendGroupMessage(c *gin.Context) {
 		req.RespondMessageId,
 	)
 	if err != nil {
-		if errors.Is(err, model.ChatGroupForbiddenErr) {
+		if errors.Is(err, model.GroupForbiddenErr) {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
-		if errors.Is(err, model.ChatGroupNotFoundErr) {
+		if errors.Is(err, model.GroupMetaNotFoundErr) {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
@@ -534,6 +621,7 @@ func (gc *GroupController) GetGroups(c *gin.Context) {
 	ctx := c.Request.Context()
 	groups, err := model.GetGroups(ctx, gc.Controller.DI.DBDecorator.GDB())
 	if err != nil {
+
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

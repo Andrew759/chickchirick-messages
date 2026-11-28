@@ -25,20 +25,24 @@ var upgrader = websocket.Upgrader{
 
 // IncomingMessage — сообщение от фронтенда (Vue → WS → gRPC)
 type IncomingMessage struct {
-	Type        string `json:"type,omitempty"`
-	RecipientId int64  `json:"recipientId"`
-	GroupId     string `json:"groupId,omitempty"` // UUID группового чата
-	Text        string `json:"text,omitempty"`
-	Typing      *bool  `json:"typing,omitempty"`
+	Type             string `json:"type,omitempty"`
+	RecipientId      int64  `json:"recipientId"`
+	GroupId          string `json:"groupId,omitempty"`
+	ChannelId        string `json:"channelId,omitempty"`
+	Text             string `json:"text,omitempty"`
+	Typing           *bool  `json:"typing,omitempty"`
+	RespondMessageId *int64 `json:"respondMessageId,omitempty"`
 }
 
 // OutgoingEvent — JSON, который понимает фронтенд
 type OutgoingEvent struct {
-	Message             *OutgoingMessage          `json:"message,omitempty"`
-	DeletedMessageId    int64                     `json:"deletedMessageId,omitempty"`
-	Typing              *TypingEvent              `json:"typing,omitempty"`
-	GroupAdded          *GroupAddedEvent          `json:"groupAdded,omitempty"`
-	GroupMembersChanged *GroupMembersChangedEvent `json:"groupMembersChanged,omitempty"`
+	Message               *OutgoingMessage            `json:"message,omitempty"`
+	DeletedMessageId      int64                       `json:"deletedMessageId,omitempty"`
+	Typing                *TypingEvent                `json:"typing,omitempty"`
+	GroupAdded            *GroupAddedEvent            `json:"groupAdded,omitempty"`
+	GroupMembersChanged   *GroupMembersChangedEvent   `json:"groupMembersChanged,omitempty"`
+	ChannelAdded          *ChannelAddedEvent          `json:"channelAdded,omitempty"`
+	ChannelMembersChanged *ChannelMembersChangedEvent `json:"channelMembersChanged,omitempty"`
 }
 
 // GroupAddedEvent — вас добавили в группу (realtime)
@@ -64,16 +68,41 @@ type TypingEvent struct {
 	SenderId    int64  `json:"senderId"`
 	RecipientId int64  `json:"recipientId"`
 	GroupId     string `json:"groupId,omitempty"`
+	ChannelId   string `json:"channelId,omitempty"`
 	Typing      bool   `json:"typing"`
 }
 
+type ChannelAddedEvent struct {
+	ChannelUuid    string  `json:"channel_uuid"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description,omitempty"`
+	AvatarFileUuid *string `json:"avatar_file_uuid,omitempty"`
+	IsPublic       bool    `json:"is_public"`
+	E2EEEnabled    bool    `json:"e2ee_enabled"`
+	CreatedBy      int     `json:"created_by"`
+	MemberCount    int     `json:"member_count"`
+}
+
+type ChannelMembersChangedEvent struct {
+	ChannelUuid    string `json:"channel_uuid"`
+	Title          string `json:"title,omitempty"`
+	AddedUserIds   []int  `json:"added_user_ids,omitempty"`
+	RemovedUserIds []int  `json:"removed_user_ids,omitempty"`
+	MemberCount    int    `json:"member_count"`
+	ActorUserId    int    `json:"actor_user_id"`
+	E2EEEnabled    bool   `json:"e2ee_enabled"`
+}
+
 type OutgoingMessage struct {
-	Id          int64  `json:"id"`
-	SenderId    int64  `json:"senderId"`
-	RecipientId int64  `json:"recipientId"`
-	GroupId     string `json:"groupId,omitempty"`
-	Text        string `json:"text"`
-	CreatedAt   string `json:"createdAt,omitempty"`
+	Id               int64  `json:"id"`
+	SenderId         int64  `json:"senderId"`
+	RecipientId      int64  `json:"recipientId"`
+	GroupId          string `json:"groupId,omitempty"`
+	ChannelId        string `json:"channelId,omitempty"`
+	Text             string `json:"text"`
+	CreatedAt        string `json:"createdAt,omitempty"`
+	RespondMessageId *int64 `json:"respondMessageId,omitempty"`
+	Edited           bool   `json:"edited,omitempty"`
 }
 
 // HandleWS grpcAddr — gRPC messenger; db опционален (для groupId lookup).
@@ -129,6 +158,29 @@ func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 					return
 				}
 
+				if msg.ChannelId != "" {
+					isTyping := msg.Type == "typing" || msg.Typing != nil
+					if !isTyping {
+						log.Println("ws: channel messages should use REST API, channelId=", msg.ChannelId)
+						continue
+					}
+					active := false
+					if msg.Typing != nil {
+						active = *msg.Typing
+					} else {
+						active = msg.Text != "0" && msg.Text != ""
+					}
+					req := &messenger.SendMessageRequest{
+						Text:   "__CHANNEL_TYPING_CMD__" + msg.ChannelId,
+						Typing: &active,
+					}
+					if err := stream.Send(req); err != nil {
+						log.Println("stream send channel typing error:", err)
+						return
+					}
+					continue
+				}
+
 				if msg.GroupId != "" {
 					isTyping := msg.Type == "typing" || msg.Typing != nil
 					if !isTyping {
@@ -159,8 +211,9 @@ func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 				}
 
 				req := &messenger.SendMessageRequest{
-					RecipientId: msg.RecipientId,
-					Text:        msg.Text,
+					RecipientId:      msg.RecipientId,
+					Text:             msg.Text,
+					RespondMessageId: msg.RespondMessageId,
 				}
 
 				if msg.Type == "typing" {
@@ -228,12 +281,43 @@ func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 						break
 					}
 				}
+				if strings.HasPrefix(m.Text, "__CHANNEL_ADDED__") {
+					var ch ChannelAddedEvent
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(m.Text, "__CHANNEL_ADDED__")), &ch); err == nil && ch.ChannelUuid != "" {
+						out.ChannelAdded = &ch
+						break
+					}
+				}
+				if strings.HasPrefix(m.Text, "__CHANNEL_MEMBERS_CHANGED__") {
+					var ch ChannelMembersChangedEvent
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(m.Text, "__CHANNEL_MEMBERS_CHANGED__")), &ch); err == nil && ch.ChannelUuid != "" {
+						out.ChannelMembersChanged = &ch
+						break
+					}
+				}
+				if strings.HasPrefix(m.Text, "__CHANNEL_TYPING__") {
+					var ct struct {
+						ChannelUuid string `json:"channel_uuid"`
+						SenderID    int64  `json:"sender_id"`
+						Typing      bool   `json:"typing"`
+					}
+					if err := json.Unmarshal([]byte(strings.TrimPrefix(m.Text, "__CHANNEL_TYPING__")), &ct); err == nil && ct.ChannelUuid != "" {
+						out.Typing = &TypingEvent{
+							SenderId:  ct.SenderID,
+							ChannelId: ct.ChannelUuid,
+							Typing:    ct.Typing,
+						}
+						break
+					}
+				}
 				createdAt := time.Now().UTC().Format(time.RFC3339Nano)
 				if m.CreatedAt != nil {
 					createdAt = m.CreatedAt.AsTime().UTC().Format(time.RFC3339Nano)
 				}
 				text := m.Text
+				edited := false
 				groupId := ""
+				channelId := ""
 				// Явный group_id из MessageStream: "__GID__:<uuid>\n" + body
 				if strings.HasPrefix(text, "__GID__:") {
 					rest := strings.TrimPrefix(text, "__GID__:")
@@ -242,7 +326,19 @@ func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 						text = rest[i+1:]
 					}
 				}
-				// Fallback: связь message → group в БД (без проверки recipient_id)
+				// Явный channel_id: "__CID__:<uuid>\n" + body
+				if strings.HasPrefix(text, "__CID__:") {
+					rest := strings.TrimPrefix(text, "__CID__:")
+					if i := strings.IndexByte(rest, '\n'); i >= 0 {
+						channelId = rest[:i]
+						text = rest[i+1:]
+					}
+				}
+				if strings.HasPrefix(text, "__EDITED__") {
+					edited = true
+					text = strings.TrimPrefix(text, "__EDITED__")
+				}
+				// Fallback: связь message → group в БД
 				if groupId == "" && db != nil && m.Id > 0 {
 					if link, err := message.GetGroupByMessageId(context.Background(), db, int(m.Id)); err == nil {
 						groupId = link.GroupId.String()
@@ -251,13 +347,30 @@ func HandleWS(grpcAddr string, db *gorm.DB) http.HandlerFunc {
 						}
 					}
 				}
+				// Fallback: связь message → channel
+				if channelId == "" && db != nil && m.Id > 0 {
+					if link, err := message.GetChannelMsgByMessageId(context.Background(), db, int(m.Id)); err == nil {
+						channelId = link.ChannelId.String()
+						if m.SenderId == 0 && link.SenderId > 0 {
+							m.SenderId = int64(link.SenderId)
+						}
+					}
+				}
+				var respondID *int64
+				if m.RespondMessageId != nil {
+					v := m.GetRespondMessageId()
+					respondID = &v
+				}
 				out.Message = &OutgoingMessage{
-					Id:          m.Id,
-					SenderId:    m.SenderId,
-					RecipientId: m.RecipientId,
-					GroupId:     groupId,
-					Text:        text,
-					CreatedAt:   createdAt,
+					Id:               m.Id,
+					SenderId:         m.SenderId,
+					RecipientId:      m.RecipientId,
+					GroupId:          groupId,
+					ChannelId:        channelId,
+					Text:             text,
+					CreatedAt:        createdAt,
+					RespondMessageId: respondID,
+					Edited:           edited,
 				}
 			case *messenger.MessageEvent_DeletedMessageId:
 				out.DeletedMessageId = e.DeletedMessageId

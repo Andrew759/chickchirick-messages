@@ -58,15 +58,46 @@ type RedisGroupTypingPayload struct {
 	Typing    bool   `json:"typing"`
 }
 
+type RedisChannelPayload struct {
+	ChannelUuid    string  `json:"channel_uuid"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description,omitempty"`
+	AvatarFileUuid *string `json:"avatar_file_uuid,omitempty"`
+	IsPublic       bool    `json:"is_public"`
+	E2EEEnabled    bool    `json:"e2ee_enabled"`
+	CreatedBy      int     `json:"created_by"`
+	MemberCount    int     `json:"member_count"`
+}
+
+type RedisChannelMembersChangedPayload struct {
+	ChannelUuid    string `json:"channel_uuid"`
+	Title          string `json:"title,omitempty"`
+	AddedUserIds   []int  `json:"added_user_ids,omitempty"`
+	RemovedUserIds []int  `json:"removed_user_ids,omitempty"`
+	MemberCount    int    `json:"member_count"`
+	ActorUserId    int    `json:"actor_user_id"`
+	E2EEEnabled    bool   `json:"e2ee_enabled"`
+}
+
+type RedisChannelTypingPayload struct {
+	ChannelUuid string `json:"channel_uuid"`
+	SenderID    int64  `json:"sender_id"`
+	Typing      bool   `json:"typing"`
+}
+
 type RedisMessageEvent struct {
-	Type             grpc.MessageType            `json:"type"`
-	Message          *messenger.Message          `json:"message,omitempty"`
-	GroupId          string                      `json:"group_id,omitempty"`
-	Group            *RedisGroupPayload          `json:"group,omitempty"`
-	MembersChanged   *RedisMembersChangedPayload `json:"members_changed,omitempty"`
-	DeletedMessageID int64                       `json:"deleted_message_id,omitempty"`
-	Typing           *RedisTypingEvent           `json:"typing,omitempty"`
-	// service.PublishGroupTyping пишет сюда же "typing" с GroupTypingPayload shape
+	Type             grpc.MessageType                   `json:"type"`
+	Message          *messenger.Message                 `json:"message,omitempty"`
+	GroupId          string                             `json:"group_id,omitempty"`
+	ChannelId        string                             `json:"channel_id,omitempty"`
+	Group            *RedisGroupPayload                 `json:"group,omitempty"`
+	Channel          *RedisChannelPayload               `json:"channel,omitempty"`
+	MembersChanged   *RedisMembersChangedPayload        `json:"members_changed,omitempty"`
+	ChannelMembers   *RedisChannelMembersChangedPayload `json:"channel_members_changed,omitempty"`
+	DeletedMessageID int64                              `json:"deleted_message_id,omitempty"`
+	Edited           bool                               `json:"edited,omitempty"`
+	Typing           *RedisTypingEvent                  `json:"typing,omitempty"`
+	// service.PublishGroupTyping / PublishChannelTyping — typing payload
 }
 
 func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStreamServer) error {
@@ -103,6 +134,13 @@ func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStre
 			if event.Type == grpc.TypeNewMessage {
 				msg := event.Message
 				// Явный group_id вместо recipient_id=0: временный транспортный префикс, WS снимает.
+				if msg != nil && event.Edited {
+					msg = &messenger.Message{
+						Id: msg.Id, SenderId: msg.SenderId, RecipientId: msg.RecipientId,
+						Text: "__EDITED__" + msg.Text, CreatedAt: msg.CreatedAt,
+						RespondMessageId: msg.RespondMessageId,
+					}
+				}
 				if msg != nil && event.GroupId != "" {
 					cloned := &messenger.Message{
 						Id:               msg.Id,
@@ -114,12 +152,41 @@ func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStre
 					}
 					msg = cloned
 				}
+				if msg != nil && event.ChannelId != "" {
+					cloned := &messenger.Message{
+						Id:               msg.Id,
+						SenderId:         msg.SenderId,
+						RecipientId:      msg.RecipientId,
+						Text:             "__CID__:" + event.ChannelId + "\n" + msg.Text,
+						CreatedAt:        msg.CreatedAt,
+						RespondMessageId: msg.RespondMessageId,
+					}
+					msg = cloned
+				}
 				grpcEvent.Event = &messenger.MessageEvent_Message{Message: msg}
 			} else if event.Type == grpc.TypeDelete {
 				grpcEvent.Event = &messenger.MessageEvent_DeletedMessageId{DeletedMessageId: event.DeletedMessageID}
 			} else if event.Type == grpc.TypeTyping && event.Typing != nil {
-				// Групповой typing: прокидываем через Message text (в proto TypingEvent нет group_id)
-				if event.Typing.GroupUuid != "" || event.GroupId != "" {
+				// Канальный typing
+				if event.ChannelId != "" || (event.Typing != nil && event.Typing.GroupUuid == "" && event.GroupId == "" && event.ChannelId != "") {
+					// handled below if ChannelId set on event
+				}
+				if event.ChannelId != "" {
+					raw, _ := json.Marshal(map[string]interface{}{
+						"channel_uuid": event.ChannelId,
+						"sender_id":    event.Typing.SenderID,
+						"typing":       event.Typing.Typing,
+					})
+					// Prefer explicit channel typing payload from service
+					grpcEvent.Event = &messenger.MessageEvent_Message{
+						Message: &messenger.Message{
+							SenderId:  event.Typing.SenderID,
+							Text:      "__CHANNEL_TYPING__" + string(raw),
+							CreatedAt: timestamppb.Now(),
+						},
+					}
+				} else if event.Typing.GroupUuid != "" || event.GroupId != "" {
+					// Групповой typing: прокидываем через Message text (в proto TypingEvent нет group_id)
 					gid := event.Typing.GroupUuid
 					if gid == "" {
 						gid = event.GroupId
@@ -162,6 +229,33 @@ func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStre
 						CreatedAt: timestamppb.Now(),
 					},
 				}
+			} else if event.Type == grpc.TypeChannelAdded && event.Channel != nil {
+				raw, _ := json.Marshal(event.Channel)
+				grpcEvent.Event = &messenger.MessageEvent_Message{
+					Message: &messenger.Message{
+						Text:      "__CHANNEL_ADDED__" + string(raw),
+						CreatedAt: timestamppb.Now(),
+					},
+				}
+			} else if event.Type == grpc.TypeChannelMembersChanged && event.ChannelMembers != nil {
+				raw, _ := json.Marshal(event.ChannelMembers)
+				grpcEvent.Event = &messenger.MessageEvent_Message{
+					Message: &messenger.Message{
+						SenderId:  int64(event.ChannelMembers.ActorUserId),
+						Text:      "__CHANNEL_MEMBERS_CHANGED__" + string(raw),
+						CreatedAt: timestamppb.Now(),
+					},
+				}
+			} else if event.Type == grpc.TypeChannelMembersChanged && event.MembersChanged != nil {
+				// fallback: service may reuse members_changed key shape with channel_uuid inside
+				raw, _ := json.Marshal(event.MembersChanged)
+				grpcEvent.Event = &messenger.MessageEvent_Message{
+					Message: &messenger.Message{
+						SenderId:  int64(event.MembersChanged.ActorUserId),
+						Text:      "__CHANNEL_MEMBERS_CHANGED__" + string(raw),
+						CreatedAt: timestamppb.Now(),
+					},
+				}
 			} else {
 				continue
 			}
@@ -183,6 +277,15 @@ func (c *Controller) MessageStream(stream messenger.MessengerService_MessageStre
 			}
 
 			if req.Typing != nil {
+				if strings.HasPrefix(req.GetText(), "__CHANNEL_TYPING_CMD__") {
+					cidStr := strings.TrimPrefix(req.GetText(), "__CHANNEL_TYPING_CMD__")
+					cu, err := uuid.Parse(cidStr)
+					if err != nil {
+						continue
+					}
+					_ = service.PublishChannelTyping(ctx, c.db, c.redis, cu, userRelation.UserId, req.GetTyping())
+					continue
+				}
 				if strings.HasPrefix(req.GetText(), "__GROUP_TYPING_CMD__") {
 					gidStr := strings.TrimPrefix(req.GetText(), "__GROUP_TYPING_CMD__")
 					gu, err := uuid.Parse(gidStr)

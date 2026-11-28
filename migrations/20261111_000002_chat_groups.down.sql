@@ -1,2 +1,2 @@
-DROP TABLE IF EXISTS chat_group_members;
-DROP TABLE IF EXISTS chat_groups;
+DROP TABLE IF EXISTS group_members;
+DROP TABLE IF EXISTS group_meta;

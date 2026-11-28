@@ -2,7 +2,7 @@
 -- Групповые чаты: сущности + участники
 -- =============================================================================
 
-CREATE TABLE IF NOT EXISTS chat_groups (
+CREATE TABLE IF NOT EXISTS group_meta (
     id                  SERIAL          PRIMARY KEY,
     group_uuid          UUID            NOT NULL DEFAULT gen_random_uuid(),
     title               VARCHAR(255)    NOT NULL,
@@ -12,23 +12,23 @@ CREATE TABLE IF NOT EXISTS chat_groups (
     updated_at          TIMESTAMPTZ(6)  NOT NULL DEFAULT NOW(),
     deleted_at          TIMESTAMPTZ(6),
 
-    CONSTRAINT fk_chat_groups_creator
+    CONSTRAINT fk_group_meta_creator
         FOREIGN KEY (created_by) REFERENCES user_relations (user_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_groups_group_uuid
-    ON chat_groups (group_uuid)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_group_meta_group_uuid
+    ON group_meta (group_uuid)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_chat_groups_created_by ON chat_groups (created_by);
-CREATE INDEX IF NOT EXISTS idx_chat_groups_avatar_file_uuid ON chat_groups (avatar_file_uuid);
-CREATE INDEX IF NOT EXISTS idx_chat_groups_deleted_at ON chat_groups (deleted_at);
+CREATE INDEX IF NOT EXISTS idx_group_meta_created_by ON group_meta (created_by);
+CREATE INDEX IF NOT EXISTS idx_group_meta_avatar_file_uuid ON group_meta (avatar_file_uuid);
+CREATE INDEX IF NOT EXISTS idx_group_meta_deleted_at ON group_meta (deleted_at);
 
-COMMENT ON TABLE chat_groups IS 'Групповой чат: название, аватар (file_uuid из files-сервиса), владелец';
+COMMENT ON TABLE group_meta IS 'Групповой чат: название, аватар (file_uuid из files-сервиса), владелец';
 
 -- -----------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS chat_group_members (
+CREATE TABLE IF NOT EXISTS group_members (
     id          SERIAL          PRIMARY KEY,
     group_id    INTEGER         NOT NULL,
     user_id     INTEGER         NOT NULL,
@@ -37,18 +37,18 @@ CREATE TABLE IF NOT EXISTS chat_group_members (
     updated_at  TIMESTAMPTZ(6)  NOT NULL DEFAULT NOW(),
     deleted_at  TIMESTAMPTZ(6),
 
-    CONSTRAINT fk_chat_group_members_group
-        FOREIGN KEY (group_id) REFERENCES chat_groups (id),
-    CONSTRAINT fk_chat_group_members_user
+    CONSTRAINT fk_group_members_group
+        FOREIGN KEY (group_id) REFERENCES group_meta (id),
+    CONSTRAINT fk_group_members_user
         FOREIGN KEY (user_id) REFERENCES user_relations (user_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_group_members_group_user
-    ON chat_group_members (group_id, user_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_group_user
+    ON group_members (group_id, user_id)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_chat_group_members_group_id ON chat_group_members (group_id);
-CREATE INDEX IF NOT EXISTS idx_chat_group_members_user_id ON chat_group_members (user_id);
-CREATE INDEX IF NOT EXISTS idx_chat_group_members_deleted_at ON chat_group_members (deleted_at);
+CREATE INDEX IF NOT EXISTS idx_group_members_group_id ON chat_group_members (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON chat_group_members (user_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_deleted_at ON chat_group_members (deleted_at);
 
-COMMENT ON TABLE chat_group_members IS 'Участники группового чата (owner|admin|member)';
+COMMENT ON TABLE group_members IS 'Участники группового чата (owner|admin|member)';

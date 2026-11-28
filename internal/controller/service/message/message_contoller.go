@@ -2,6 +2,8 @@ package message
 
 import (
 	"chickchirick-messages/internal/controller/c_controller"
+	"chickchirick-messages/internal/enum/grpc"
+	"chickchirick-messages/internal/gen/messenger"
 	"chickchirick-messages/internal/middleware"
 	"chickchirick-messages/internal/model/message"
 	msgservice "chickchirick-messages/internal/service"
@@ -9,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"net/http"
 	"strconv"
 
@@ -27,6 +30,7 @@ func (mc *MessagesController) RegisterRoutes() {
 	e.POST("/message", middleware.Auth(mc.Controller.DI.AuthClient), mc.CreateMessage)
 	e.GET("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.GetMessage)
 	e.PUT("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.UpdateMessage)
+	e.PATCH("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.UpdateMessage)
 	e.DELETE("/message/:id", middleware.Auth(mc.Controller.DI.AuthClient), mc.DeleteMessage)
 }
 
@@ -99,31 +103,64 @@ func (mc *MessagesController) CreateMessage(c *gin.Context) {
 }
 
 func (mc *MessagesController) UpdateMessage(c *gin.Context) {
-	idStr := c.Param("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid message id"})
 		return
 	}
-
-	var m message.Message
-	if err = c.ShouldBindJSON(&m); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text is required"})
 		return
 	}
-
+	raw, ok := c.Get("user_uuid")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user is not authenticated"})
+		return
+	}
+	userUUID, _ := raw.(string)
+	if userUUID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authenticated user"})
+		return
+	}
 	ctx := c.Request.Context()
-	err = message.UpdateMessageById(ctx, mc.Controller.DI.DBDecorator.GDB(), &m, id)
+	db := mc.Controller.DI.DBDecorator.GDB()
+	actor, err := message.GetUserRelationByUuid(ctx, db, userUUID)
 	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user relation not found"})
+		return
+	}
+	personal, err := message.GetPersonalByMessageId(ctx, db, id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		return
+	}
+	if personal.SenderId != actor.UserId {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only sender can edit the message"})
+		return
+	}
+	if err := message.UpdateMessageTextById(ctx, db, id, req.Text); err != nil {
 		if errors.Is(err, message.MessageNotFoundErr) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update message: " + err.Error()})
 		}
 		return
 	}
-
-	c.JSON(http.StatusOK, m)
+	updated, err := message.GetMessageById(ctx, db, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load updated message"})
+		return
+	}
+	if rdb := mc.Controller.DI.RedisDecorator; rdb != nil && rdb.Client != nil {
+		protoMsg := &messenger.Message{Id: int64(id), SenderId: int64(actor.UserId), RecipientId: int64(personal.RecipientId), Text: updated.Text, CreatedAt: timestamppb.New(updated.CreatedAt.Time)}
+		eventData, _ := json.Marshal(RedisMessageEvent{Type: grpc.TypeNewMessage, Message: protoMsg, Edited: true})
+		_ = rdb.Client.Publish(ctx, fmt.Sprintf("user_events_%d", personal.RecipientId), eventData).Err()
+		_ = rdb.Client.Publish(ctx, fmt.Sprintf("user_events_%d", personal.SenderId), eventData).Err()
+	}
+	c.JSON(http.StatusOK, gin.H{"id": updated.Id, "text": updated.Text, "edited": true})
 }
 
 func (mc *MessagesController) DeleteMessage(c *gin.Context) {

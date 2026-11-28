@@ -23,16 +23,18 @@ func CreateMessage(ctx context.Context, db *gorm.DB, m *Message) error {
 	return db.WithContext(ctx).Create(m).Error
 }
 
-func UpdateMessageById(ctx context.Context, db *gorm.DB, m *Message, id int) error {
-	var message Message
-	tx := db.WithContext(ctx)
-
-	result := tx.First(&message, id)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+func UpdateMessageTextById(ctx context.Context, db *gorm.DB, id int, text string) error {
+	result := db.WithContext(ctx).
+		Model(&Message{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("text", text)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
 		return MessageNotFoundErr
 	}
-
-	return tx.Save(m).Error
+	return nil
 }
 
 func GetMessages(ctx context.Context, db *gorm.DB) ([]Message, error) {

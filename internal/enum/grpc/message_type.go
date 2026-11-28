@@ -10,15 +10,19 @@ const (
 	TypeTyping
 	TypeGroupAdded
 	TypeGroupMembersChanged
+	TypeChannelAdded
+	TypeChannelMembersChanged
 	TypeUnknown
 )
 
 const (
-	strNewMessage          = "new_message"
-	strDelete              = "delete"
-	StrTyping              = "typing"
-	strGroupAdded          = "group_added"
-	strGroupMembersChanged = "group_members_changed"
+	strNewMessage            = "new_message"
+	strDelete                = "delete"
+	StrTyping                = "typing"
+	strGroupAdded            = "group_added"
+	strGroupMembersChanged   = "group_members_changed"
+	strChannelAdded          = "channel_added"
+	strChannelMembersChanged = "channel_members_changed"
 )
 
 func (t MessageType) MarshalJSON() ([]byte, error) {
@@ -33,6 +37,10 @@ func (t MessageType) MarshalJSON() ([]byte, error) {
 		return json.Marshal(strGroupAdded)
 	case TypeGroupMembersChanged:
 		return json.Marshal(strGroupMembersChanged)
+	case TypeChannelAdded:
+		return json.Marshal(strChannelAdded)
+	case TypeChannelMembersChanged:
+		return json.Marshal(strChannelMembersChanged)
 	default:
 		return json.Marshal("")
 	}
@@ -55,6 +63,10 @@ func (t *MessageType) UnmarshalJSON(b []byte) error {
 		*t = TypeGroupAdded
 	case strGroupMembersChanged:
 		*t = TypeGroupMembersChanged
+	case strChannelAdded:
+		*t = TypeChannelAdded
+	case strChannelMembersChanged:
+		*t = TypeChannelMembersChanged
 	default:
 		*t = TypeUnknown
 	}
