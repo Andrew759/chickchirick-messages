@@ -110,8 +110,7 @@ func (gc *GroupController) CreateGroupChat(c *gin.Context) {
 	}
 
 	var avatar *uuid.UUID
-	// TODO: предполагается, что фронтенд может слать nil, но не пустую строку
-	if req.AvatarFileUuid != nil {
+	if req.AvatarFileUuid != nil && *req.AvatarFileUuid != "" {
 		parsed, err := uuid.Parse(*req.AvatarFileUuid)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid avatar_file_uuid"})
@@ -164,7 +163,6 @@ func (gc *GroupController) ListMyGroupChats(c *gin.Context) {
 
 	out := make([]groupChatResponse, 0, len(groups))
 	for _, g := range groups {
-		//TODO: тут множественные запромсы в цикле
 		ids, _ := model.ListGroupMemberUserIds(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id)
 		out = append(out, toGroupChatResponse(g, len(ids)))
 	}
@@ -182,18 +180,18 @@ func (gc *GroupController) GetGroupChat(c *gin.Context) {
 		return
 	}
 
-	gm, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
+	g, err := model.GetGroupMetaByUuid(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), groupUuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
 		return
 	}
-	okMember, err := model.IsGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), gm.Id, ur.UserId)
+	okMember, err := model.IsGroupMember(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id, ur.UserId)
 	if err != nil || !okMember {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not a member"})
 		return
 	}
-	ids, _ := model.ListGroupMemberUserIds(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), gm.Id)
-	c.JSON(http.StatusOK, toGroupChatResponse(gm, len(ids)))
+	ids, _ := model.ListGroupMemberUserIds(c.Request.Context(), gc.Controller.DI.DBDecorator.GDB(), g.Id)
+	c.JSON(http.StatusOK, toGroupChatResponse(g, len(ids)))
 }
 
 type updateGroupChatRequest struct {

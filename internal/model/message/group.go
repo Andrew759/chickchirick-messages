@@ -22,6 +22,9 @@ type Group struct {
 	DeletedAt  gorm.DeletedAt `gorm:"index"`
 }
 
+// TableName stores the message-to-group relation separately from group metadata.
+func (Group) TableName() string { return "group_messages" }
+
 var GroupNotFoundErr = errors.New("group not found")
 
 func CreateGroup(ctx context.Context, db *gorm.DB, g *Group) error {

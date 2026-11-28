@@ -47,8 +47,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_group_members_group_user
     ON group_members (group_id, user_id)
     WHERE deleted_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_group_members_group_id ON chat_group_members (group_id);
-CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON chat_group_members (user_id);
-CREATE INDEX IF NOT EXISTS idx_group_members_deleted_at ON chat_group_members (deleted_at);
+CREATE INDEX IF NOT EXISTS idx_group_members_group_id ON group_members (group_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_user_id ON group_members (user_id);
+CREATE INDEX IF NOT EXISTS idx_group_members_deleted_at ON group_members (deleted_at);
 
 COMMENT ON TABLE group_members IS 'Участники группового чата (owner|admin|member)';

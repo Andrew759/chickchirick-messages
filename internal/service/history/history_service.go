@@ -65,12 +65,12 @@ func GetHistory(ctx context.Context, db *gorm.DB, userUUID string) (History, err
 
 	var groupRows []row
 	err = db.WithContext(ctx).
-		Table("groups AS g").
+		Table("group_messages AS g").
 		Select("m.id, g.sender_id AS sender_id, NULL::int AS recipient_id, g.group_id::text AS group_id, m.text, m.created_at, message_meta.respond_message_id").
 		Joins("JOIN messages AS m ON m.id = g.message_id").
 		Joins("LEFT JOIN message_meta ON message_meta.message_id = m.id").
-		Joins("JOIN chat_groups AS cg ON cg.group_uuid = g.group_id AND cg.deleted_at IS NULL").
-		Joins("JOIN chat_group_members AS cgm ON cgm.group_id = cg.id AND cgm.user_id = ? AND cgm.deleted_at IS NULL", userID).
+		Joins("JOIN group_meta AS cg ON cg.group_uuid = g.group_id AND cg.deleted_at IS NULL").
+		Joins("JOIN group_members AS cgm ON cgm.group_id = cg.id AND cgm.user_id = ? AND cgm.deleted_at IS NULL", userID).
 		Where("m.deleted_at IS NULL AND g.deleted_at IS NULL").
 		Order("m.created_at ASC, m.id ASC").
 		Scan(&groupRows).Error
